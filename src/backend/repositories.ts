@@ -1,6 +1,7 @@
 import type {
   AgentRecord,
   McpServerRecord,
+  McpToolCallRecord,
   McpToolRecord,
   RetrievalHit,
   RunEventRecord,
@@ -232,6 +233,53 @@ export class McpServerRepository {
       name: row.name,
       description: row.description,
       inputSchema: parseJson<unknown>(row.input_schema_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
+
+  createToolCall(serverId: string, toolName: string, args: unknown): McpToolCallRecord {
+    const id = newId("call");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO mcp_tool_calls (
+        id, server_id, tool_name, arguments_json, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, serverId, toolName, JSON.stringify(args ?? {}), "running", at, at);
+    return this.toolCalls().find((call) => call.id === id)!;
+  }
+
+  completeToolCall(id: string, result: unknown): McpToolCallRecord {
+    db.prepare(
+      `UPDATE mcp_tool_calls
+       SET status = 'completed', result_json = ?, error = NULL, updated_at = ?
+       WHERE id = ?`
+    ).run(JSON.stringify(result ?? null), nowIso(), id);
+    return this.toolCalls().find((call) => call.id === id)!;
+  }
+
+  failToolCall(id: string, error: string): McpToolCallRecord {
+    db.prepare(
+      `UPDATE mcp_tool_calls
+       SET status = 'failed', error = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(error, nowIso(), id);
+    return this.toolCalls().find((call) => call.id === id)!;
+  }
+
+  toolCalls(serverId?: string): McpToolCallRecord[] {
+    const sql = serverId
+      ? `SELECT * FROM mcp_tool_calls WHERE server_id = ? ORDER BY created_at DESC LIMIT 50`
+      : `SELECT * FROM mcp_tool_calls ORDER BY created_at DESC LIMIT 50`;
+    const rows = serverId ? db.prepare(sql).all(serverId) : db.prepare(sql).all();
+    return rows.map((row: any) => ({
+      id: row.id,
+      serverId: row.server_id,
+      toolName: row.tool_name,
+      arguments: parseJson<unknown>(row.arguments_json),
+      status: row.status,
+      result: row.result_json ? parseJson<unknown>(row.result_json) : undefined,
+      error: row.error ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }));

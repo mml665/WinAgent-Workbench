@@ -62,6 +62,19 @@ try {
     throw "MCP tools/list did not persist echo_context"
   }
 
+  $toolCall = Invoke-RestMethod `
+    -Uri "http://127.0.0.1:$Port/api/mcp-servers/$($mcp.id)/tools/echo_context/call" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body (@{ arguments = @{ text = "WINAGENT_TOOL_CALL_OK" } } | ConvertTo-Json -Depth 5)
+  if ($toolCall.status -ne "completed") {
+    throw "MCP tools/call did not complete: $($toolCall.error)"
+  }
+  $toolCallJson = $toolCall.result | ConvertTo-Json -Depth 10
+  if ($toolCallJson -notmatch "WINAGENT_TOOL_CALL_OK") {
+    throw "MCP tools/call result did not include expected payload"
+  }
+
   $indexResult = Invoke-RestMethod `
     -Uri "http://127.0.0.1:$Port/api/workspaces/$($workspace.id)/index" `
     -Method Post
@@ -69,21 +82,24 @@ try {
     throw "Workspace index did not include smoke files"
   }
 
-  $hits = @(Invoke-RestMethod `
-      -Uri "http://127.0.0.1:$Port/api/workspaces/$($workspace.id)/search?q=Space%20Path%20Smoke&limit=5" `
-      -Method Get)
+  $searchQuery = [System.Uri]::EscapeDataString("Space Path Smoke")
+  $searchUri = "http://127.0.0.1:$Port/api/workspaces/$($workspace.id)/search?q=$searchQuery" + "&limit=5"
+  $hits = @(Invoke-RestMethod -Uri $searchUri -Method Get)
   if ($hits.Count -lt 1) {
     throw "Workspace retrieval returned no hits"
   }
 
-  $agents = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/agents" -Method Get)
+  $agents = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/agents" -Method Get
+  $agent = @($agents) |
+    Where-Object { $_.name -eq "PowerShell Demo Agent" } |
+    Select-Object -First 1
   $run = Invoke-RestMethod `
     -Uri "http://127.0.0.1:$Port/api/runs" `
     -Method Post `
     -ContentType "application/json" `
     -Body (@{
       workspaceId = $workspace.id
-      agentId = $agents[0].id
+      agentId = $agent.id
       title = "Windows smoke"
       prompt = "Print WINAGENT_SMOKE_OK"
       retrievalQuery = "Space Path Smoke"
@@ -97,7 +113,7 @@ try {
   do {
     Start-Sleep -Milliseconds 500
     $runs = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/runs" -Method Get
-    $runStatus = ($runs | Where-Object { $_.id -eq $run.id })[0]
+    $runStatus = @($runs) | Where-Object { $_.id -eq $run.id } | Select-Object -First 1
   } while ($runStatus.status -in @("queued", "running") -and (Get-Date) -lt $deadline)
 
   if ($runStatus.status -ne "completed") {
@@ -139,8 +155,8 @@ try {
   $deadline = (Get-Date).AddSeconds(30)
   do {
     Start-Sleep -Milliseconds 500
-    $runs = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/runs" -Method Get)
-    $retryStatus = ($runs | Where-Object { $_.id -eq $retryRun.id })[0]
+    $runs = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/runs" -Method Get
+    $retryStatus = @($runs) | Where-Object { $_.id -eq $retryRun.id } | Select-Object -First 1
   } while ($retryStatus.status -in @("queued", "running") -and (Get-Date) -lt $deadline)
 
   if ($retryStatus.status -ne "failed" -or $retryStatus.attempt -ne 2) {
@@ -151,6 +167,7 @@ try {
   Write-Host "     workspace: $($workspace.rootPath)"
   Write-Host "     run:       $($run.id)"
   Write-Host "     mcp tool:  echo_context"
+  Write-Host "     tool call: $($toolCall.status)"
   Write-Host "     indexed:   $($indexResult.indexed)"
 } finally {
   Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue

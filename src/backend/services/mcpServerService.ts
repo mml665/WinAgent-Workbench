@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { McpServerRecord } from "../../shared/types";
+import type { McpServerRecord, McpToolCallRecord } from "../../shared/types";
 import { McpServerRepository } from "../repositories";
 
 export class McpServerService {
@@ -13,6 +13,10 @@ export class McpServerService {
 
   tools(serverId?: string) {
     return this.servers.tools(serverId);
+  }
+
+  toolCalls(serverId?: string): McpToolCallRecord[] {
+    return this.servers.toolCalls(serverId);
   }
 
   create(input: {
@@ -59,6 +63,24 @@ export class McpServerService {
     }
     const server = this.servers.get(serverId);
     return server ? this.servers.updateStatus(serverId, "stopped") : server!;
+  }
+
+  async callTool(serverId: string, toolName: string, args: unknown): Promise<McpToolCallRecord> {
+    const server = this.servers.get(serverId);
+    if (!server) {
+      throw new Error(`MCP server not found: ${serverId}`);
+    }
+    const session = this.sessions.get(serverId);
+    if (!session) {
+      throw new Error(`MCP server is not running: ${server.name}`);
+    }
+    const call = this.servers.createToolCall(serverId, toolName, args ?? {});
+    try {
+      const result = await session.callTool(toolName, args ?? {});
+      return this.servers.completeToolCall(call.id, result);
+    } catch (error) {
+      return this.servers.failToolCall(call.id, error instanceof Error ? error.message : String(error));
+    }
   }
 }
 
@@ -111,6 +133,14 @@ class McpSession {
     this.notify("notifications/initialized", {});
     const response = await this.request("tools/list", {});
     return Array.isArray(response.result?.tools) ? response.result.tools : [];
+  }
+
+  async callTool(name: string, args: unknown): Promise<unknown> {
+    const response = await this.request("tools/call", {
+      name,
+      arguments: args ?? {}
+    });
+    return response.result ?? null;
   }
 
   stop(): void {

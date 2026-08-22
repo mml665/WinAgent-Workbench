@@ -55,6 +55,18 @@ db.exec(`
     UNIQUE(server_id, name)
   );
 
+  CREATE TABLE IF NOT EXISTS mcp_tool_calls (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    result_json TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -110,6 +122,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_runs_workspace ON runs(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, sequence);
   CREATE INDEX IF NOT EXISTS idx_workspace_index_workspace ON workspace_index(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_server ON mcp_tool_calls(server_id, created_at);
 `);
 
 for (const migration of [

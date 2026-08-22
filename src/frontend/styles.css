@@ -223,6 +223,25 @@ pre {
   white-space: nowrap;
 }
 
+.tool-call-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.tool-call-row {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e4eaf2;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.tool-call-row pre {
+  max-height: 120px;
+}
+
 .run-row {
   display: grid;
   gap: 6px;

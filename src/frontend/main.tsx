@@ -4,6 +4,7 @@ import type {
   AgentRecord,
   FileEntry,
   McpServerRecord,
+  McpToolCallRecord,
   McpToolRecord,
   RetrievalHit,
   RunEventRecord,
@@ -34,6 +35,7 @@ function App() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerRecord[]>([]);
   const [mcpTools, setMcpTools] = useState<McpToolRecord[]>([]);
+  const [mcpToolCalls, setMcpToolCalls] = useState<McpToolCallRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [events, setEvents] = useState<Record<string, RunEventRecord[]>>({});
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -52,6 +54,7 @@ function App() {
   const [mcpName, setMcpName] = useState("Mock MCP");
   const [mcpCommand, setMcpCommand] = useState("node.exe");
   const [mcpArgs, setMcpArgs] = useState("tools/mock-mcp-server.mjs");
+  const [toolArguments, setToolArguments] = useState('{"text":"hello from WinAgent"}');
   const [error, setError] = useState("");
 
   const selectedRun = runs[0];
@@ -103,12 +106,21 @@ function App() {
 
   async function refreshAll() {
     try {
-      const [nextWorkspaces, nextAgents, nextSkills, nextMcp, nextTools, nextRuns] = await Promise.all([
+      const [
+        nextWorkspaces,
+        nextAgents,
+        nextSkills,
+        nextMcp,
+        nextTools,
+        nextToolCalls,
+        nextRuns
+      ] = await Promise.all([
         api<WorkspaceRecord[]>("/api/workspaces"),
         api<AgentRecord[]>("/api/agents"),
         api<SkillRecord[]>("/api/skills"),
         api<McpServerRecord[]>("/api/mcp-servers"),
         api<McpToolRecord[]>("/api/mcp-tools"),
+        api<McpToolCallRecord[]>("/api/mcp-tool-calls"),
         api<RunRecord[]>("/api/runs")
       ]);
       setWorkspaces(nextWorkspaces);
@@ -116,6 +128,7 @@ function App() {
       setSkills(nextSkills);
       setMcpServers(nextMcp);
       setMcpTools(nextTools);
+      setMcpToolCalls(nextToolCalls);
       setRuns(nextRuns);
       setSelectedWorkspaceId((current) => current || nextWorkspaces[0]?.id || "");
       setSelectedAgentId((current) => current || nextAgents[0]?.id || "");
@@ -229,6 +242,17 @@ function App() {
     await refreshAll();
   }
 
+  async function callMcpTool(tool: McpToolRecord) {
+    await api<McpToolCallRecord>(
+      `/api/mcp-servers/${tool.serverId}/tools/${encodeURIComponent(tool.name)}/call`,
+      {
+        method: "POST",
+        body: JSON.stringify({ arguments: JSON.parse(toolArguments || "{}") })
+      }
+    );
+    await refreshAll();
+  }
+
   const output = useMemo(
     () =>
       selectedEvents
@@ -323,13 +347,28 @@ function App() {
             ))}
           </div>
           <h3>Tools</h3>
+          <label>
+            Tool arguments JSON
+            <input value={toolArguments} onChange={(event) => setToolArguments(event.target.value)} />
+          </label>
           <ul>
             {mcpTools.map((tool) => (
               <li key={tool.id}>
                 {tool.name} <span className="muted">{tool.description}</span>
+                <button onClick={() => void callMcpTool(tool)}>Call</button>
               </li>
             ))}
           </ul>
+          <h3>Tool calls</h3>
+          <div className="tool-call-list">
+            {mcpToolCalls.map((call) => (
+              <div className="tool-call-row" key={call.id}>
+                <strong>{call.toolName}</strong>
+                <span>{call.status}</span>
+                <pre>{JSON.stringify(call.result ?? call.error ?? call.arguments, null, 2)}</pre>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

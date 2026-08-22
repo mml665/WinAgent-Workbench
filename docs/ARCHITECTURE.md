@@ -56,7 +56,7 @@ Loads local skills from `skills/*/skill.json` and `README.md`.
 
 `McpServerService`
 
-Stores MCP server command configuration and lifecycle status. V2 starts a stdio MCP server, performs JSON-RPC `initialize`, sends `notifications/initialized`, calls `tools/list`, and persists discovered tools. Tool invocation is a later boundary.
+Stores MCP server command configuration and lifecycle status. V2 starts a stdio MCP server, performs JSON-RPC `initialize`, sends `notifications/initialized`, calls `tools/list`, persists discovered tools, invokes `tools/call`, and stores call arguments/results/errors for audit.
 
 `ContextProvider`
 

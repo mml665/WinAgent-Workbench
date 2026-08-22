@@ -30,6 +30,7 @@ The product is not a generic chatbot. It is a local runtime host that makes Agen
    - Start and stop stdio MCP servers.
    - Run MCP `initialize` and `tools/list`.
    - Persist discovered tools and lifecycle errors.
+   - Call MCP tools and persist arguments, result, status, and error.
    - Keep lifecycle management separate from Agent process execution.
 
 6. Context Provider

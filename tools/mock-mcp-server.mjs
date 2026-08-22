@@ -66,6 +66,30 @@ function handle(message) {
     });
     return;
   }
+  if (message.method === "tools/call") {
+    const toolName = message.params?.name;
+    if (toolName !== "echo_context") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32602, message: `Unknown tool: ${toolName}` }
+      });
+      return;
+    }
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        content: [
+          {
+            type: "text",
+            text: `echo_context:${message.params?.arguments?.text ?? ""}`
+          }
+        ]
+      }
+    });
+    return;
+  }
   send({
     jsonrpc: "2.0",
     id: message.id,

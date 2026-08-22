@@ -32,6 +32,7 @@ the default dependency set so Windows CI stays fast and reproducible.
 Implemented:
 
 - Start/stop local MCP stdio servers and persist discovered tools.
+- Invoke MCP tools through `tools/call` and persist arguments/results/errors.
 - Build a lightweight text index for a workspace and search it for retrieval context.
 - Inject skill instructions, explicit files, MCP server names, and retrieval hits into an Agent prompt.
 - Cancel queued or running runs.

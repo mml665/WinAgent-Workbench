@@ -75,6 +75,24 @@ export async function handleApi(
       sendJson(res, 200, services.mcpServers.tools(url.searchParams.get("serverId") ?? undefined));
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/mcp-tool-calls") {
+      sendJson(res, 200, services.mcpServers.toolCalls(url.searchParams.get("serverId") ?? undefined));
+      return;
+    }
+    const mcpToolCallMatch = url.pathname.match(/^\/api\/mcp-servers\/([^/]+)\/tools\/([^/]+)\/call$/);
+    if (req.method === "POST" && mcpToolCallMatch) {
+      const body = await readJson<{ arguments?: unknown }>(req);
+      sendJson(
+        res,
+        200,
+        await services.mcpServers.callTool(
+          mcpToolCallMatch[1],
+          decodeURIComponent(mcpToolCallMatch[2]),
+          body.arguments ?? {}
+        )
+      );
+      return;
+    }
     const mcpStartMatch = url.pathname.match(/^\/api\/mcp-servers\/([^/]+)\/start$/);
     if (req.method === "POST" && mcpStartMatch) {
       sendJson(res, 200, await services.mcpServers.start(mcpStartMatch[1]));
