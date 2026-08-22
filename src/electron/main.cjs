@@ -1,4 +1,5 @@
-const { app, BrowserWindow } = require("electron");
+const path = require("node:path");
+const { app, BrowserWindow, shell } = require("electron");
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -12,7 +13,18 @@ function createWindow() {
       nodeIntegration: false
     }
   });
-  window.loadURL("http://127.0.0.1:5173");
+
+  window.setMenuBarVisibility(false);
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  if (process.argv.includes("--built")) {
+    window.loadFile(path.join(__dirname, "..", "..", "dist", "index.html"));
+  } else {
+    window.loadURL("http://127.0.0.1:5173");
+  }
 }
 
 app.whenReady().then(() => {

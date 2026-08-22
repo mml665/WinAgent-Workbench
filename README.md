@@ -23,9 +23,25 @@ npm run dev
 
 Open `http://127.0.0.1:5173`.
 
-The first milestone runs as a local web workbench backed by a Node local runtime.
-An Electron shell scaffold is kept under `src/electron`, but Electron is not in
-the default dependency set so Windows CI stays fast and reproducible.
+Desktop window:
+
+```powershell
+npm run dev:desktop
+```
+
+The first desktop launch downloads the pinned Electron runtime through `npx`.
+If that download is slow, the browser dev mode and all backend validation
+commands still work normally.
+
+Built desktop preview:
+
+```powershell
+npm run build:desktop
+npm run preview:desktop
+```
+
+The workbench can run either in a browser for development or as an Electron
+desktop window for demos.
 
 ## V2 Capability Boundaries
 
