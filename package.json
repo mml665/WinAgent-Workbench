@@ -1,0 +1,35 @@
+{
+  "name": "winagent-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Windows-first local Agent runtime workbench with WebSocket streaming.",
+  "main": "src/electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n backend,web \"npm:dev:backend\" \"npm:dev:web\"",
+    "dev:backend": "tsx src/backend/server.ts",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --test --import tsx tests/*.test.ts",
+    "smoke:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-smoke.ps1"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "@types/node": "^24.2.1",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

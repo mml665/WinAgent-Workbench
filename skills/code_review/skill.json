@@ -1,0 +1,5 @@
+{
+  "id": "code_review",
+  "name": "Code Review",
+  "description": "Review referenced files and report correctness, maintainability, and test gaps."
+}

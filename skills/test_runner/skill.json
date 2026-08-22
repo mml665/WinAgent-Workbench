@@ -1,0 +1,5 @@
+{
+  "id": "test_runner",
+  "name": "Test Runner",
+  "description": "Plan and execute a focused validation path for the selected workspace."
+}
