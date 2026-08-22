@@ -5,12 +5,14 @@ import type { McpServerService } from "./services/mcpServerService";
 import type { RunService } from "./services/runService";
 import type { SkillRegistry } from "./services/skillRegistry";
 import type { WorkspaceService } from "./services/workspaceService";
+import type { WorkspaceIndexService } from "./services/workspaceIndexService";
 
 export interface HttpServices {
   workspaces: WorkspaceService;
   agents: AgentConfigService;
   skills: SkillRegistry;
   mcpServers: McpServerService;
+  workspaceIndex: WorkspaceIndexService;
   runs: RunService;
 }
 
@@ -69,6 +71,38 @@ export async function handleApi(
       sendJson(res, 200, services.mcpServers.create(await readJson(req)));
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/mcp-tools") {
+      sendJson(res, 200, services.mcpServers.tools(url.searchParams.get("serverId") ?? undefined));
+      return;
+    }
+    const mcpStartMatch = url.pathname.match(/^\/api\/mcp-servers\/([^/]+)\/start$/);
+    if (req.method === "POST" && mcpStartMatch) {
+      sendJson(res, 200, await services.mcpServers.start(mcpStartMatch[1]));
+      return;
+    }
+    const mcpStopMatch = url.pathname.match(/^\/api\/mcp-servers\/([^/]+)\/stop$/);
+    if (req.method === "POST" && mcpStopMatch) {
+      sendJson(res, 200, services.mcpServers.stop(mcpStopMatch[1]));
+      return;
+    }
+    const indexMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/index$/);
+    if (req.method === "POST" && indexMatch) {
+      sendJson(res, 200, services.workspaceIndex.build(indexMatch[1]));
+      return;
+    }
+    const searchMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/search$/);
+    if (req.method === "GET" && searchMatch) {
+      sendJson(
+        res,
+        200,
+        services.workspaceIndex.search(
+          searchMatch[1],
+          required(url.searchParams.get("q"), "q"),
+          Number(url.searchParams.get("limit") ?? 5)
+        )
+      );
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/runs") {
       sendJson(res, 200, services.runs.list());
       return;
@@ -84,7 +118,11 @@ export async function handleApi(
     }
     const eventMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/events$/);
     if (req.method === "GET" && eventMatch) {
-      sendJson(res, 200, services.runs.eventsForRun(eventMatch[1]));
+      sendJson(
+        res,
+        200,
+        services.runs.eventsForRun(eventMatch[1], Number(url.searchParams.get("after") ?? 0))
+      );
       return;
     }
     sendJson(res, 404, { error: "Not found" });

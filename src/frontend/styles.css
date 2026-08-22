@@ -189,6 +189,40 @@ pre {
   overflow: auto;
 }
 
+.mcp-list {
+  display: grid;
+  gap: 6px;
+}
+
+.mcp-row,
+.retrieval-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e4eaf2;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.retrieval-list {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.retrieval-row {
+  grid-template-columns: 42px minmax(0, 1fr);
+}
+
+.retrieval-row span,
+.mcp-row span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-row {
   display: grid;
   gap: 6px;

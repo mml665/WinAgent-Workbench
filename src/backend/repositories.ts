@@ -1,8 +1,11 @@
 import type {
   AgentRecord,
   McpServerRecord,
+  McpToolRecord,
+  RetrievalHit,
   RunEventRecord,
   RunRecord,
+  WorkspaceIndexRecord,
   WorkspaceRecord
 } from "../shared/types";
 import { db } from "./db";
@@ -142,7 +145,7 @@ export class McpServerRepository {
   list(): McpServerRecord[] {
     return db
       .prepare(
-        `SELECT id, name, command, args_json, env_json, status, created_at, updated_at
+        `SELECT id, name, command, args_json, env_json, status, last_error, created_at, updated_at
          FROM mcp_servers ORDER BY created_at ASC`
       )
       .all()
@@ -153,9 +156,14 @@ export class McpServerRepository {
         args: parseJson<string[]>(row.args_json),
         env: parseJson<Record<string, string>>(row.env_json),
         status: row.status,
+        lastError: row.last_error ?? undefined,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       }));
+  }
+
+  get(id: string): McpServerRecord | null {
+    return this.list().find((server) => server.id === id) ?? null;
   }
 
   create(input: {
@@ -181,6 +189,53 @@ export class McpServerRepository {
     );
     return this.list().find((server) => server.id === id)!;
   }
+
+  updateStatus(id: string, status: McpServerRecord["status"], lastError?: string): McpServerRecord {
+    db.prepare(`UPDATE mcp_servers SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
+      status,
+      lastError ?? null,
+      nowIso(),
+      id
+    );
+    return this.get(id)!;
+  }
+
+  replaceTools(serverId: string, tools: Array<{ name: string; description?: string; inputSchema?: unknown }>): void {
+    const at = nowIso();
+    db.prepare(`DELETE FROM mcp_tools WHERE server_id = ?`).run(serverId);
+    const insert = db.prepare(
+      `INSERT INTO mcp_tools (
+        id, server_id, name, description, input_schema_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const tool of tools) {
+      insert.run(
+        newId("tool"),
+        serverId,
+        tool.name,
+        tool.description ?? "",
+        JSON.stringify(tool.inputSchema ?? {}),
+        at,
+        at
+      );
+    }
+  }
+
+  tools(serverId?: string): McpToolRecord[] {
+    const sql = serverId
+      ? `SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY name ASC`
+      : `SELECT * FROM mcp_tools ORDER BY server_id ASC, name ASC`;
+    const rows = serverId ? db.prepare(sql).all(serverId) : db.prepare(sql).all();
+    return rows.map((row: any) => ({
+      id: row.id,
+      serverId: row.server_id,
+      name: row.name,
+      description: row.description,
+      inputSchema: parseJson<unknown>(row.input_schema_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
 }
 
 export class RunRepository {
@@ -203,14 +258,18 @@ export class RunRepository {
     title: string;
     prompt: string;
     cwd: string;
+    maxRetries?: number;
+    timeoutMs?: number;
+    retrievalQuery?: string;
   }): RunRecord {
     const id = newId("run");
     const at = nowIso();
     db.prepare(
       `INSERT INTO runs (
         id, workspace_id, agent_id, skill_id, title, prompt, status, cwd,
+        max_retries, timeout_ms, retrieval_query,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       input.workspaceId,
@@ -220,9 +279,22 @@ export class RunRepository {
       input.prompt,
       "queued",
       input.cwd,
+      Math.max(0, input.maxRetries ?? 0),
+      Math.max(1000, input.timeoutMs ?? 120000),
+      input.retrievalQuery ?? null,
       at,
       at
     );
+    return this.get(id)!;
+  }
+
+  requeue(id: string, attempt: number): RunRecord {
+    db.prepare(
+      `UPDATE runs
+       SET status = 'queued', attempt = ?, started_at = NULL, ended_at = NULL,
+           exit_code = NULL, duration_ms = NULL, updated_at = ?
+       WHERE id = ?`
+    ).run(attempt, nowIso(), id);
     return this.get(id)!;
   }
 
@@ -302,6 +374,10 @@ function mapRun(row: any): RunRecord {
     prompt: row.prompt,
     status: row.status,
     cwd: row.cwd,
+    attempt: row.attempt ?? 1,
+    maxRetries: row.max_retries ?? 0,
+    timeoutMs: row.timeout_ms ?? 120000,
+    retrievalQuery: row.retrieval_query ?? undefined,
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
     exitCode: row.exit_code,
@@ -310,4 +386,89 @@ function mapRun(row: any): RunRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+export class WorkspaceIndexRepository {
+  replaceWorkspaceIndex(
+    workspaceId: string,
+    entries: Array<{ path: string; size: number; modifiedAt: string; content: string }>
+  ): number {
+    db.prepare(`DELETE FROM workspace_index WHERE workspace_id = ?`).run(workspaceId);
+    const at = nowIso();
+    const insert = db.prepare(
+      `INSERT INTO workspace_index (
+        id, workspace_id, path, size, modified_at, content, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const entry of entries) {
+      insert.run(
+        newId("idx"),
+        workspaceId,
+        entry.path,
+        entry.size,
+        entry.modifiedAt,
+        entry.content,
+        at,
+        at
+      );
+    }
+    return entries.length;
+  }
+
+  list(workspaceId: string): WorkspaceIndexRecord[] {
+    return db
+      .prepare(`SELECT * FROM workspace_index WHERE workspace_id = ? ORDER BY path ASC`)
+      .all(workspaceId)
+      .map((row: any) => ({
+        id: row.id,
+        workspaceId: row.workspace_id,
+        path: row.path,
+        size: row.size,
+        modifiedAt: row.modified_at,
+        content: row.content,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+  }
+
+  search(workspaceId: string, query: string, limit = 5): RetrievalHit[] {
+    const terms = tokenize(query);
+    if (terms.length === 0) {
+      return [];
+    }
+    return this.list(workspaceId)
+      .map((entry) => {
+        const haystack = `${entry.path}\n${entry.content}`.toLowerCase();
+        const score = terms.reduce((sum, term) => sum + countOccurrences(haystack, term), 0);
+        return {
+          path: entry.path,
+          score,
+          snippet: makeSnippet(entry.content, terms)
+        };
+      })
+      .filter((hit) => hit.score > 0)
+      .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+      .slice(0, limit);
+  }
+}
+
+function tokenize(query: string): string[] {
+  return Array.from(new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])).slice(0, 12);
+}
+
+function countOccurrences(text: string, term: string): number {
+  let count = 0;
+  let index = text.indexOf(term);
+  while (index >= 0) {
+    count += 1;
+    index = text.indexOf(term, index + term.length);
+  }
+  return count;
+}
+
+function makeSnippet(content: string, terms: string[]): string {
+  const lower = content.toLowerCase();
+  const firstHit = terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0;
+  const start = Math.max(0, firstHit - 160);
+  return content.slice(start, start + 520).trim();
 }

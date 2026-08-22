@@ -27,17 +27,22 @@ The product is not a generic chatbot. It is a local runtime host that makes Agen
 
 5. MCP server manager
    - Store local MCP server command configuration.
-   - Track configured/running/error status.
+   - Start and stop stdio MCP servers.
+   - Run MCP `initialize` and `tools/list`.
+   - Persist discovered tools and lifecycle errors.
    - Keep lifecycle management separate from Agent process execution.
 
 6. Context Provider
    - Support explicit file references.
+   - Build a lightweight text index for project files.
+   - Search indexed files and inject top project snippets.
    - Inject selected file content into the prompt with path and truncation metadata.
 
 7. Run queue and concurrency
    - Limit active runs per workspace.
    - Limit active runs per Agent.
    - Support queued, running, completed, failed, and cancelled states.
+   - Support queued cancel, process timeout, and retry on failure.
 
 8. Persistence
    - Store workspaces, agents, runs, run events, file references, and MCP servers in SQLite.

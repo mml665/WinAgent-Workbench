@@ -4,6 +4,8 @@ import type {
   AgentRecord,
   FileEntry,
   McpServerRecord,
+  McpToolRecord,
+  RetrievalHit,
   RunEventRecord,
   RunRecord,
   SkillRecord,
@@ -31,6 +33,7 @@ function App() {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerRecord[]>([]);
+  const [mcpTools, setMcpTools] = useState<McpToolRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [events, setEvents] = useState<Record<string, RunEventRecord[]>>({});
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -42,6 +45,13 @@ function App() {
   const [fileRefs, setFileRefs] = useState<string[]>([]);
   const [title, setTitle] = useState("Smoke run");
   const [prompt, setPrompt] = useState("Summarize this workspace and print WINAGENT_DONE.");
+  const [retrievalQuery, setRetrievalQuery] = useState("workspace agent runtime");
+  const [retrievalHits, setRetrievalHits] = useState<RetrievalHit[]>([]);
+  const [timeoutMs, setTimeoutMs] = useState(120000);
+  const [maxRetries, setMaxRetries] = useState(0);
+  const [mcpName, setMcpName] = useState("Mock MCP");
+  const [mcpCommand, setMcpCommand] = useState("node.exe");
+  const [mcpArgs, setMcpArgs] = useState("tools/mock-mcp-server.mjs");
   const [error, setError] = useState("");
 
   const selectedRun = runs[0];
@@ -50,6 +60,12 @@ function App() {
   useEffect(() => {
     void refreshAll();
   }, []);
+
+  useEffect(() => {
+    if (selectedRun) {
+      void loadRunEvents(selectedRun.id);
+    }
+  }, [selectedRun?.id]);
 
   useEffect(() => {
     const ws = new WebSocket("ws://127.0.0.1:8787/ws");
@@ -87,17 +103,19 @@ function App() {
 
   async function refreshAll() {
     try {
-      const [nextWorkspaces, nextAgents, nextSkills, nextMcp, nextRuns] = await Promise.all([
+      const [nextWorkspaces, nextAgents, nextSkills, nextMcp, nextTools, nextRuns] = await Promise.all([
         api<WorkspaceRecord[]>("/api/workspaces"),
         api<AgentRecord[]>("/api/agents"),
         api<SkillRecord[]>("/api/skills"),
         api<McpServerRecord[]>("/api/mcp-servers"),
+        api<McpToolRecord[]>("/api/mcp-tools"),
         api<RunRecord[]>("/api/runs")
       ]);
       setWorkspaces(nextWorkspaces);
       setAgents(nextAgents);
       setSkills(nextSkills);
       setMcpServers(nextMcp);
+      setMcpTools(nextTools);
       setRuns(nextRuns);
       setSelectedWorkspaceId((current) => current || nextWorkspaces[0]?.id || "");
       setSelectedAgentId((current) => current || nextAgents[0]?.id || "");
@@ -108,6 +126,11 @@ function App() {
 
   async function refreshRuns() {
     setRuns(await api<RunRecord[]>("/api/runs"));
+  }
+
+  async function loadRunEvents(runId: string) {
+    const nextEvents = await api<RunEventRecord[]>(`/api/runs/${runId}/events`);
+    setEvents((previous) => ({ ...previous, [runId]: nextEvents }));
   }
 
   async function loadFiles() {
@@ -147,7 +170,10 @@ function App() {
           skillId: selectedSkillId || undefined,
           title,
           prompt,
-          fileRefs
+          fileRefs,
+          retrievalQuery,
+          timeoutMs,
+          maxRetries
         })
       });
       await refreshRuns();
@@ -160,6 +186,47 @@ function App() {
   async function cancelRun(runId: string) {
     await api(`/api/runs/${runId}/cancel`, { method: "POST" });
     await refreshRuns();
+  }
+
+  async function indexWorkspace() {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+    const result = await api<{ indexed: number }>(`/api/workspaces/${selectedWorkspaceId}/index`, {
+      method: "POST"
+    });
+    setError(`Indexed ${result.indexed} files`);
+  }
+
+  async function searchWorkspace() {
+    if (!selectedWorkspaceId || !retrievalQuery.trim()) {
+      return;
+    }
+    const query = new URLSearchParams({ q: retrievalQuery, limit: "5" });
+    setRetrievalHits(await api<RetrievalHit[]>(`/api/workspaces/${selectedWorkspaceId}/search?${query}`));
+  }
+
+  async function createMcpServer() {
+    await api<McpServerRecord>("/api/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify({
+        name: mcpName,
+        command: mcpCommand,
+        args: mcpArgs.split(/\s+/).filter(Boolean),
+        env: {}
+      })
+    });
+    await refreshAll();
+  }
+
+  async function startMcp(serverId: string) {
+    await api<McpServerRecord>(`/api/mcp-servers/${serverId}/start`, { method: "POST" });
+    await refreshAll();
+  }
+
+  async function stopMcp(serverId: string) {
+    await api<McpServerRecord>(`/api/mcp-servers/${serverId}/stop`, { method: "POST" });
+    await refreshAll();
   }
 
   const output = useMemo(
@@ -232,6 +299,37 @@ function App() {
               </span>
             ))}
           </div>
+          <label>
+            MCP name
+            <input value={mcpName} onChange={(event) => setMcpName(event.target.value)} />
+          </label>
+          <label>
+            MCP command
+            <input value={mcpCommand} onChange={(event) => setMcpCommand(event.target.value)} />
+          </label>
+          <label>
+            MCP args
+            <input value={mcpArgs} onChange={(event) => setMcpArgs(event.target.value)} />
+          </label>
+          <button onClick={() => void createMcpServer()}>Add MCP server</button>
+          <div className="mcp-list">
+            {mcpServers.map((server) => (
+              <div key={server.id} className="mcp-row">
+                <span>{server.name}</span>
+                <span>{server.status}</span>
+                <button onClick={() => void startMcp(server.id)}>Start</button>
+                <button onClick={() => void stopMcp(server.id)}>Stop</button>
+              </div>
+            ))}
+          </div>
+          <h3>Tools</h3>
+          <ul>
+            {mcpTools.map((tool) => (
+              <li key={tool.id}>
+                {tool.name} <span className="muted">{tool.description}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
@@ -279,6 +377,38 @@ function App() {
           <label>
             Prompt
             <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+          </label>
+          <label>
+            Retrieval query
+            <input value={retrievalQuery} onChange={(event) => setRetrievalQuery(event.target.value)} />
+          </label>
+          <div className="file-actions">
+            <button onClick={() => void indexWorkspace()}>Build index</button>
+            <button onClick={() => void searchWorkspace()}>Search</button>
+          </div>
+          <div className="retrieval-list">
+            {retrievalHits.map((hit) => (
+              <div className="retrieval-row" key={hit.path}>
+                <strong>{hit.score}</strong>
+                <span>{hit.path}</span>
+              </div>
+            ))}
+          </div>
+          <label>
+            Timeout ms
+            <input
+              type="number"
+              value={timeoutMs}
+              onChange={(event) => setTimeoutMs(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Max retries
+            <input
+              type="number"
+              value={maxRetries}
+              onChange={(event) => setMaxRetries(Number(event.target.value))}
+            />
           </label>
           <button disabled={!selectedWorkspaceId || !selectedAgentId} onClick={() => void createRun()}>
             Start run

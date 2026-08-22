@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import type { SkillRecord, WorkspaceRecord } from "../../shared/types";
+import type { RetrievalHit, SkillRecord, WorkspaceRecord } from "../../shared/types";
 import { isPathInside, normalizeHostPath } from "../utils/windowsPaths";
 
 const MAX_FILE_CHARS = 8000;
@@ -12,6 +12,7 @@ export class ContextProvider {
     prompt: string;
     fileRefs: string[];
     mcpServerNames: string[];
+    retrievalHits?: RetrievalHit[];
   }): string {
     const sections: string[] = [];
     sections.push("# Workspace");
@@ -29,6 +30,17 @@ export class ContextProvider {
     if (fileContext) {
       sections.push("\n# Referenced Files");
       sections.push(fileContext);
+    }
+    if (input.retrievalHits && input.retrievalHits.length > 0) {
+      sections.push("\n# Retrieved Project Context");
+      sections.push(
+        input.retrievalHits
+          .map(
+            (hit) =>
+              `## ${path.relative(input.workspace.rootPath, hit.path)}\nScore: ${hit.score}\n\`\`\`\n${hit.snippet}\n\`\`\``
+          )
+          .join("\n\n")
+      );
     }
     sections.push("\n# User Task");
     sections.push(input.prompt.trim());

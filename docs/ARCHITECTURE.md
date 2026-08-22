@@ -11,7 +11,8 @@ Local Backend
   -> AgentProcessManager
   -> ContextProvider
   -> SkillRegistry
-  -> McpServerService
+  -> McpServerService / MCP stdio JSON-RPC client
+  -> WorkspaceIndexService
   -> SQLite repositories
 
 Windows Host
@@ -35,7 +36,7 @@ Creates runs, assembles prompt context, updates status, and asks the queue to sc
 
 `RunQueue`
 
-Applies local concurrency policy. The first policy is max two active runs per workspace and max one active run per Agent.
+Applies local concurrency policy. The policy is max two active runs per workspace and max one active run per Agent. It also supports queued-run cancellation; `RunService` owns timeout and retry decisions.
 
 `AgentProcessManager`
 
@@ -55,8 +56,12 @@ Loads local skills from `skills/*/skill.json` and `README.md`.
 
 `McpServerService`
 
-Stores MCP server command configuration and lifecycle status. The first version manages config and status, not full MCP protocol calls.
+Stores MCP server command configuration and lifecycle status. V2 starts a stdio MCP server, performs JSON-RPC `initialize`, sends `notifications/initialized`, calls `tools/list`, and persists discovered tools. Tool invocation is a later boundary.
 
 `ContextProvider`
 
-Builds the final prompt from user prompt, skill instructions, workspace metadata, and explicit file references.
+Builds the final prompt from user prompt, skill instructions, workspace metadata, explicit file references, MCP server names, and retrieved project snippets.
+
+`WorkspaceIndexService`
+
+Builds a bounded local text index from workspace files. It ignores build/output/state folders and stores compact text content in SQLite. Retrieval is keyword scored for V2; vector search is intentionally deferred.

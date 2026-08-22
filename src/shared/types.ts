@@ -39,6 +39,17 @@ export interface McpServerRecord {
   args: string[];
   env: Record<string, string>;
   status: "configured" | "running" | "error" | "stopped";
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpToolRecord {
+  id: string;
+  serverId: string;
+  name: string;
+  description: string;
+  inputSchema: unknown;
   createdAt: string;
   updatedAt: string;
 }
@@ -52,6 +63,10 @@ export interface RunRecord {
   prompt: string;
   status: RunStatus;
   cwd: string;
+  attempt: number;
+  maxRetries: number;
+  timeoutMs: number;
+  retrievalQuery?: string;
   startedAt?: string;
   endedAt?: string;
   exitCode?: number | null;
@@ -83,4 +98,21 @@ export interface FileEntry {
   kind: "file" | "directory";
   size: number;
   modifiedAt: string;
+}
+
+export interface WorkspaceIndexRecord {
+  id: string;
+  workspaceId: string;
+  path: string;
+  size: number;
+  modifiedAt: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RetrievalHit {
+  path: string;
+  score: number;
+  snippet: string;
 }

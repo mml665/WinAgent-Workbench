@@ -20,6 +20,15 @@ export class RunQueue {
     this.pump();
   }
 
+  cancel(runId: string): boolean {
+    const index = this.pending.findIndex((item) => item.run.id === runId);
+    if (index < 0) {
+      return false;
+    }
+    this.pending.splice(index, 1);
+    return true;
+  }
+
   complete(run: RunRecord): void {
     this.activeByWorkspace.set(
       run.workspaceId,

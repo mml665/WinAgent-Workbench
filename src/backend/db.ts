@@ -39,8 +39,20 @@ db.exec(`
     args_json TEXT NOT NULL,
     env_json TEXT NOT NULL,
     status TEXT NOT NULL,
+    last_error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS mcp_tools (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    input_schema_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(server_id, name)
   );
 
   CREATE TABLE IF NOT EXISTS runs (
@@ -52,6 +64,10 @@ db.exec(`
     prompt TEXT NOT NULL,
     status TEXT NOT NULL,
     cwd TEXT NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    max_retries INTEGER NOT NULL DEFAULT 0,
+    timeout_ms INTEGER NOT NULL DEFAULT 120000,
+    retrieval_query TEXT,
     started_at TEXT,
     ended_at TEXT,
     exit_code INTEGER,
@@ -78,7 +94,36 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS workspace_index (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    modified_at TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(workspace_id, path)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS idx_runs_workspace ON runs(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, sequence);
+  CREATE INDEX IF NOT EXISTS idx_workspace_index_workspace ON workspace_index(workspace_id);
 `);
+
+for (const migration of [
+  "ALTER TABLE mcp_servers ADD COLUMN last_error TEXT",
+  "ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE runs ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE runs ADD COLUMN timeout_ms INTEGER NOT NULL DEFAULT 120000",
+  "ALTER TABLE runs ADD COLUMN retrieval_query TEXT"
+]) {
+  try {
+    db.exec(migration);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("duplicate column")) {
+      throw error;
+    }
+  }
+}

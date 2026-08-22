@@ -6,6 +6,7 @@ import { AgentProcessManager } from "./agentProcessManager";
 import { ContextProvider } from "./contextProvider";
 import { RunQueue } from "./runQueue";
 import { SkillRegistry } from "./skillRegistry";
+import { WorkspaceIndexService } from "./workspaceIndexService";
 
 export class RunService {
   constructor(
@@ -15,6 +16,7 @@ export class RunService {
     private readonly mcpServers: McpServerRepository,
     private readonly skills: SkillRegistry,
     private readonly contextProvider: ContextProvider,
+    private readonly workspaceIndex: WorkspaceIndexService,
     private readonly processManager: AgentProcessManager,
     private readonly queue: RunQueue,
     private readonly events: EventBus
@@ -24,8 +26,8 @@ export class RunService {
     return this.runs.list();
   }
 
-  eventsForRun(runId: string) {
-    return this.runs.events(runId);
+  eventsForRun(runId: string, afterSequence = 0) {
+    return this.runs.events(runId).filter((event) => event.sequence > afterSequence);
   }
 
   create(input: {
@@ -35,6 +37,9 @@ export class RunService {
     title: string;
     prompt: string;
     fileRefs?: string[];
+    maxRetries?: number;
+    timeoutMs?: number;
+    retrievalQuery?: string;
   }): RunRecord {
     const workspace = this.workspaces.get(input.workspaceId);
     const agent = this.agents.get(input.agentId);
@@ -47,7 +52,10 @@ export class RunService {
       skillId: input.skillId,
       title: input.title || input.prompt.slice(0, 80) || "Untitled run",
       prompt: input.prompt,
-      cwd: agent.cwd || workspace.rootPath
+      cwd: agent.cwd || workspace.rootPath,
+      maxRetries: input.maxRetries,
+      timeoutMs: input.timeoutMs,
+      retrievalQuery: input.retrievalQuery
     });
     for (const ref of input.fileRefs ?? []) {
       this.runs.addFileRef(run.id, ref);
@@ -66,10 +74,12 @@ export class RunService {
     if (!run) {
       throw new Error(`Run not found: ${runId}`);
     }
+    const removed = this.queue.cancel(runId);
     const killed = this.processManager.cancel(runId);
-    if (!killed && run.status === "queued") {
+    if ((removed || !killed) && run.status === "queued") {
       const cancelled = this.runs.updateStatus(runId, "cancelled", { endedAt: nowIso() });
       this.events.publish(runId, "run.cancelled", { reason: "cancelled before start" });
+      this.events.publish(runId, "run.status.changed", { status: "cancelled" });
       return cancelled;
     }
     this.events.publish(runId, "run.status.changed", { status: "cancelling" });
@@ -89,16 +99,27 @@ export class RunService {
     const running = this.runs.updateStatus(run.id, "running", { startedAt });
     this.events.publish(run.id, "run.started", { startedAt, agent: agent.name });
     this.events.publish(run.id, "run.status.changed", { status: "running" });
+    const retrievalHits = run.retrievalQuery
+      ? this.workspaceIndex.search(workspace.id, run.retrievalQuery, 5)
+      : this.workspaceIndex.search(workspace.id, run.prompt, 5);
     const prompt = this.contextProvider.buildPrompt({
       workspace,
       skill,
       prompt: run.prompt,
       fileRefs,
-      mcpServerNames: mcpNames
+      mcpServerNames: mcpNames,
+      retrievalHits
     });
     const started = Date.now();
     let output = "";
     let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      this.events.publish(run.id, "run.failed", { error: "run timed out", timeoutMs: running.timeoutMs });
+      this.processManager.cancel(run.id);
+    }, running.timeoutMs);
     this.processManager.start(running, agent, prompt, {
       onStdout: (chunk) => {
         output += chunk;
@@ -109,6 +130,11 @@ export class RunService {
         this.events.publish(run.id, "run.error.delta", { text: chunk });
       },
       onError: (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
         const endedAt = nowIso();
         this.runs.updateStatus(run.id, "failed", {
           endedAt,
@@ -119,9 +145,30 @@ export class RunService {
         this.queue.complete(running);
       },
       onExit: ({ code, signal }) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
         const endedAt = nowIso();
         const durationMs = Date.now() - started;
-        const status = code === 0 ? "completed" : signal ? "cancelled" : "failed";
+        const status = code === 0 && !timedOut ? "completed" : signal && !timedOut ? "cancelled" : "failed";
+        if (status === "failed" && running.attempt <= running.maxRetries) {
+          const nextAttempt = running.attempt + 1;
+          const retried = this.runs.requeue(run.id, nextAttempt);
+          this.events.publish(run.id, "run.status.changed", {
+            status: "queued",
+            reason: "retry",
+            attempt: nextAttempt,
+            maxRetries: running.maxRetries
+          });
+          this.queue.complete(running);
+          this.queue.enqueue({
+            run: retried,
+            execute: () => this.execute(run.id, fileRefs)
+          });
+          return;
+        }
         this.runs.updateStatus(run.id, status, {
           endedAt,
           exitCode: code,
