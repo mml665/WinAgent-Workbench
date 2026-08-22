@@ -242,6 +242,40 @@ pre {
   max-height: 120px;
 }
 
+.memory-list {
+  display: grid;
+  gap: 8px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.memory-row {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e4eaf2;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.memory-row > div,
+.memory-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-row small,
+.memory-meta {
+  color: #647386;
+  font-size: 12px;
+}
+
+.memory-row p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .run-row {
   display: grid;
   gap: 6px;

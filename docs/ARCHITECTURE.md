@@ -13,6 +13,7 @@ Local Backend
   -> SkillRegistry
   -> McpServerService / MCP stdio JSON-RPC client
   -> WorkspaceIndexService
+  -> MemoryService
   -> SQLite repositories
 
 Windows Host
@@ -32,7 +33,7 @@ Stores Agent command configuration. It does not spawn processes.
 
 `RunService`
 
-Creates runs, assembles prompt context, updates status, and asks the queue to schedule execution.
+Creates runs, assembles prompt context, updates status, asks the queue to schedule execution, and records terminal Run outcomes into long-term memory.
 
 `RunQueue`
 
@@ -60,12 +61,16 @@ Stores MCP server command configuration and lifecycle status. V2 starts a stdio 
 
 `ContextProvider`
 
-Builds the final prompt from user prompt, skill instructions, workspace metadata, explicit file references, MCP server names, retrieved project snippets, and pre-run MCP tool results.
+Builds the final prompt from user prompt, skill instructions, workspace metadata, explicit file references, MCP server names, retrieved project snippets, selected long-term memories, short-term working memory, and pre-run MCP tool results.
 
 `Run Export`
 
-`RunService` can produce a Markdown report for any Run. The report includes lifecycle metadata, event timeline, stdout, and stderr, giving each Agent execution an auditable artifact for review or resume evidence.
+`RunService` can produce a Markdown report for any Run. The report includes lifecycle metadata, short-term working memory, event timeline, stdout, and stderr, giving each Agent execution an auditable artifact for review or resume evidence.
 
 `WorkspaceIndexService`
 
 Builds a bounded local text index from workspace files. It ignores build/output/state folders and stores compact text content in SQLite. Retrieval is keyword scored for V2; vector search is intentionally deferred.
+
+`MemoryService`
+
+Owns Agent memory. Long-term memory is workspace scoped and persisted in SQLite with `fact`, `preference`, `decision`, `issue`, `command`, and `run_summary` types. Short-term memory is a per-Run bounded snapshot created before process start; it combines current Run metadata, recent Run summaries, retrieval hits, MCP tool results, and selected long-term memories. It is stored separately from the Run log so the exact context used by a Run can be inspected later.

@@ -6,17 +6,21 @@ import type {
   McpServerRecord,
   McpToolCallRecord,
   McpToolRecord,
+  MemoryType,
   RetrievalHit,
   RunEventRecord,
   RunRecord,
+  RunWorkingMemoryRecord,
   RunToolCallRequest,
   SkillRecord,
+  WorkspaceMemoryRecord,
   WorkspaceRecord
 } from "../shared/types";
 import type { WebSocketEnvelope } from "../shared/events";
 import "./styles.css";
 
 const apiBase = "http://127.0.0.1:8787";
+const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "command", "run_summary"];
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -39,6 +43,8 @@ function App() {
   const [mcpToolCalls, setMcpToolCalls] = useState<McpToolCallRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [events, setEvents] = useState<Record<string, RunEventRecord[]>>({});
+  const [workspaceMemories, setWorkspaceMemories] = useState<WorkspaceMemoryRecord[]>([]);
+  const [workingMemory, setWorkingMemory] = useState<RunWorkingMemoryRecord | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedSkillId, setSelectedSkillId] = useState("");
@@ -57,6 +63,10 @@ function App() {
   const [mcpArgs, setMcpArgs] = useState("tools/mock-mcp-server.mjs");
   const [toolArguments, setToolArguments] = useState('{"text":"hello from WinAgent"}');
   const [runToolCalls, setRunToolCalls] = useState<RunToolCallRequest[]>([]);
+  const [memoryType, setMemoryType] = useState<MemoryType>("fact");
+  const [memoryContent, setMemoryContent] = useState(
+    "This workspace prefers Windows-compatible Agent tooling with observable runs."
+  );
   const [error, setError] = useState("");
 
   const selectedRun = runs[0];
@@ -69,8 +79,11 @@ function App() {
   useEffect(() => {
     if (selectedRun) {
       void loadRunEvents(selectedRun.id);
+      void loadWorkingMemory(selectedRun.id);
+    } else {
+      setWorkingMemory(null);
     }
-  }, [selectedRun?.id]);
+  }, [selectedRun?.id, selectedRun?.status]);
 
   useEffect(() => {
     const ws = new WebSocket("ws://127.0.0.1:8787/ws");
@@ -104,6 +117,7 @@ function App() {
       return;
     }
     void loadFiles();
+    void loadWorkspaceMemories(selectedWorkspaceId);
   }, [selectedWorkspaceId, filePath]);
 
   async function refreshAll() {
@@ -132,8 +146,12 @@ function App() {
       setMcpTools(nextTools);
       setMcpToolCalls(nextToolCalls);
       setRuns(nextRuns);
-      setSelectedWorkspaceId((current) => current || nextWorkspaces[0]?.id || "");
+      const nextWorkspaceId = selectedWorkspaceId || nextWorkspaces[0]?.id || "";
+      setSelectedWorkspaceId((current) => current || nextWorkspaceId);
       setSelectedAgentId((current) => current || nextAgents[0]?.id || "");
+      if (nextWorkspaceId) {
+        setWorkspaceMemories(await api<WorkspaceMemoryRecord[]>(`/api/workspaces/${nextWorkspaceId}/memories`));
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -146,6 +164,18 @@ function App() {
   async function loadRunEvents(runId: string) {
     const nextEvents = await api<RunEventRecord[]>(`/api/runs/${runId}/events`);
     setEvents((previous) => ({ ...previous, [runId]: nextEvents }));
+  }
+
+  async function loadWorkingMemory(runId: string) {
+    setWorkingMemory(await api<RunWorkingMemoryRecord | null>(`/api/runs/${runId}/working-memory`));
+  }
+
+  async function loadWorkspaceMemories(workspaceId = selectedWorkspaceId) {
+    if (!workspaceId) {
+      setWorkspaceMemories([]);
+      return;
+    }
+    setWorkspaceMemories(await api<WorkspaceMemoryRecord[]>(`/api/workspaces/${workspaceId}/memories`));
   }
 
   async function loadFiles() {
@@ -193,6 +223,23 @@ function App() {
         })
       });
       await refreshRuns();
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  async function createMemory() {
+    if (!selectedWorkspaceId || !memoryContent.trim()) {
+      return;
+    }
+    try {
+      await api<WorkspaceMemoryRecord>(`/api/workspaces/${selectedWorkspaceId}/memories`, {
+        method: "POST",
+        body: JSON.stringify({ type: memoryType, content: memoryContent })
+      });
+      setMemoryContent("");
+      await loadWorkspaceMemories(selectedWorkspaceId);
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -395,6 +442,60 @@ function App() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="grid two">
+        <div className="panel">
+          <h2>Long-Term Memory</h2>
+          <p className="muted">Workspace-level memories are persisted in SQLite and selected by keyword relevance for future runs.</p>
+          <label>
+            Memory type
+            <select value={memoryType} onChange={(event) => setMemoryType(event.target.value as MemoryType)}>
+              {memoryTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Memory content
+            <textarea value={memoryContent} onChange={(event) => setMemoryContent(event.target.value)} />
+          </label>
+          <div className="file-actions">
+            <button disabled={!selectedWorkspaceId || !memoryContent.trim()} onClick={() => void createMemory()}>
+              Add memory
+            </button>
+            <button disabled={!selectedWorkspaceId} onClick={() => void loadWorkspaceMemories()}>
+              Reload
+            </button>
+          </div>
+          <div className="memory-list">
+            {workspaceMemories.length === 0 ? <span className="muted">No long-term memories yet.</span> : null}
+            {workspaceMemories.map((memory) => (
+              <div className="memory-row" key={memory.id}>
+                <div>
+                  <strong>{memory.type}</strong>
+                  <small>{memory.createdAt}</small>
+                </div>
+                <p>{memory.content}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>Short-Term Memory</h2>
+          <p className="muted">The selected run gets a bounded working-memory snapshot before the Agent process starts.</p>
+          {selectedRun ? (
+            <div className="memory-meta">
+              <span>{selectedRun.title}</span>
+              <span>{selectedRun.status}</span>
+              <span>{workingMemory ? `${workingMemory.content.length}/${workingMemory.budgetChars} chars` : "not built yet"}</span>
+            </div>
+          ) : null}
+          <pre>{workingMemory?.content ?? "No working memory for the selected run yet."}</pre>
         </div>
       </section>
 

@@ -89,6 +89,20 @@ try {
     throw "Workspace retrieval returned no hits"
   }
 
+  $manualMemory = Invoke-RestMethod `
+    -Uri "http://127.0.0.1:$Port/api/workspaces/$($workspace.id)/memories" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body (@{
+      type = "preference"
+      content = "For smoke validation, preserve the long-term marker WINAGENT_LONG_MEMORY_OK."
+    } | ConvertTo-Json)
+
+  $memories = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/workspaces/$($workspace.id)/memories" -Method Get)
+  if (-not ($memories | Where-Object { $_.id -eq $manualMemory.id -and $_.content -match "WINAGENT_LONG_MEMORY_OK" })) {
+    throw "Long-term memory was not persisted"
+  }
+
   $agents = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/agents" -Method Get
   $agent = @($agents) |
     Where-Object { $_.name -eq "PowerShell Demo Agent" } |
@@ -102,7 +116,7 @@ try {
       agentId = $agent.id
       title = "Windows smoke"
       prompt = "Print WINAGENT_SMOKE_OK"
-      retrievalQuery = "Space Path Smoke"
+      retrievalQuery = "Space Path Smoke WINAGENT_LONG_MEMORY_OK"
       timeoutMs = 30000
       maxRetries = 0
       toolCalls = @(@{
@@ -133,14 +147,30 @@ try {
   if ($output -notmatch "WINAGENT_TOOL_ASSIST_OK") {
     throw "Expected tool-assisted context was not injected into Agent output"
   }
+  if ($output -notmatch "WINAGENT_LONG_MEMORY_OK") {
+    throw "Expected long-term memory was not injected into Agent output"
+  }
   $runToolEvent = $events | Where-Object { $_.type -eq "run.tool.called" } | Select-Object -First 1
   if (-not $runToolEvent) {
     throw "Expected run.tool.called event was not recorded"
   }
 
+  $workingMemory = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/runs/$($run.id)/working-memory" -Method Get
+  if ($workingMemory.content -notmatch "Short-Term Working Memory" -or $workingMemory.content -notmatch "WINAGENT_LONG_MEMORY_OK") {
+    throw "Short-term working memory was not built with selected long-term memory"
+  }
+
   $export = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/runs/$($run.id)/export" -Method Get
-  if ($export.markdown -notmatch "Run Report" -or $export.markdown -notmatch $run.id) {
-    throw "Run export did not include report metadata"
+  if ($export.markdown -notmatch "Run Report" -or $export.markdown -notmatch $run.id -or $export.markdown -notmatch "Short-Term Working Memory") {
+    throw "Run export did not include report metadata and memory"
+  }
+
+  $memoriesAfterRun = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/workspaces/$($workspace.id)/memories" -Method Get)
+  $runSummaryMemory = $memoriesAfterRun |
+    Where-Object { $_.type -eq "run_summary" -and $_.sourceRunId -eq $run.id } |
+    Select-Object -First 1
+  if (-not $runSummaryMemory) {
+    throw "Run outcome was not persisted as long-term memory"
   }
 
   $failingAgent = Invoke-RestMethod `
@@ -187,6 +217,7 @@ try {
   Write-Host "     tool call: $($toolCall.status)"
   Write-Host "     run tool:  $($runToolEvent.payload.toolName)"
   Write-Host "     indexed:   $($indexResult.indexed)"
+  Write-Host "     memory:    $($manualMemory.type) + run_summary"
 } finally {
   Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
 }

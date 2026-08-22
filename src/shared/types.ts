@@ -135,3 +135,23 @@ export interface RetrievalHit {
   score: number;
   snippet: string;
 }
+
+export type MemoryType = "fact" | "preference" | "decision" | "issue" | "command" | "run_summary";
+
+export interface WorkspaceMemoryRecord {
+  id: string;
+  workspaceId: string;
+  type: MemoryType;
+  content: string;
+  sourceRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RunWorkingMemoryRecord {
+  id: string;
+  runId: string;
+  content: string;
+  budgetChars: number;
+  createdAt: string;
+}

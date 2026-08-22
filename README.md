@@ -10,6 +10,7 @@ The project focuses on a small but engineered loop:
 - Skill Registry for task templates
 - MCP stdio lifecycle with `initialize` and `tools/list`
 - Context Provider with explicit file references and lightweight project retrieval
+- Short-term working memory per Run and long-term workspace memory
 - Run queue with same-Agent concurrency control, queued cancel, timeout, and retry
 - SQLite persistence through Node 24 `node:sqlite`
 - Windows smoke validation
@@ -53,6 +54,8 @@ Implemented:
 - Export completed or failed Runs as Markdown reports with metadata, events, stdout, and stderr.
 - Build a lightweight text index for a workspace and search it for retrieval context.
 - Inject skill instructions, explicit files, MCP server names, and retrieval hits into an Agent prompt.
+- Persist long-term workspace memories, select relevant memories for new Runs, and build a bounded short-term working-memory snapshot before process start.
+- Automatically write completed/failed Run outcomes back into long-term memory.
 - Cancel queued or running runs.
 - Retry failed runs up to `maxRetries`.
 - Kill timed-out runs and mark them failed.
@@ -79,4 +82,4 @@ npm run smoke:windows
 
 ## Resume Positioning
 
-Reference Tutti's local Agent workspace idea, then implement a Windows-first lightweight Agent Runtime Host with WebSocket streaming, process lifecycle management, Skill Registry, MCP server configuration, Context Provider, SQLite persistence, run queue, and Windows E2E validation.
+Reference Tutti's local Agent workspace idea, then implement a Windows-first lightweight Agent Runtime Host with WebSocket streaming, process lifecycle management, Skill Registry, MCP server configuration, Context Provider, short/long-term memory, SQLite persistence, run queue, and Windows E2E validation.

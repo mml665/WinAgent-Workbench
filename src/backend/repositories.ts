@@ -3,10 +3,13 @@ import type {
   McpServerRecord,
   McpToolCallRecord,
   McpToolRecord,
+  MemoryType,
   RetrievalHit,
+  RunWorkingMemoryRecord,
   RunEventRecord,
   RunRecord,
   WorkspaceIndexRecord,
+  WorkspaceMemoryRecord,
   WorkspaceRecord
 } from "../shared/types";
 import { db } from "./db";
@@ -295,6 +298,13 @@ export class RunRepository {
       .map(mapRun);
   }
 
+  listByWorkspace(workspaceId: string, limit = 10): RunRecord[] {
+    return db
+      .prepare(`SELECT * FROM runs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`)
+      .all(workspaceId, limit)
+      .map(mapRun);
+  }
+
   get(id: string): RunRecord | null {
     const row = db.prepare(`SELECT * FROM runs WHERE id = ?`).get(id) as any;
     return row ? mapRun(row) : null;
@@ -411,6 +421,88 @@ export class RunRepository {
         createdAt: row.created_at
       }));
   }
+}
+
+export class MemoryRepository {
+  createWorkspaceMemory(input: {
+    workspaceId: string;
+    type: MemoryType;
+    content: string;
+    sourceRunId?: string;
+  }): WorkspaceMemoryRecord {
+    const id = newId("mem");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO workspace_memories (
+        id, workspace_id, type, content, source_run_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, input.workspaceId, input.type, input.content, input.sourceRunId ?? null, at, at);
+    return this.listWorkspaceMemories(input.workspaceId).find((memory) => memory.id === id)!;
+  }
+
+  listWorkspaceMemories(workspaceId: string): WorkspaceMemoryRecord[] {
+    return db
+      .prepare(`SELECT * FROM workspace_memories WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 100`)
+      .all(workspaceId)
+      .map(mapWorkspaceMemory);
+  }
+
+  searchWorkspaceMemories(workspaceId: string, query: string, limit = 5): WorkspaceMemoryRecord[] {
+    const terms = tokenize(query);
+    if (terms.length === 0) {
+      return this.listWorkspaceMemories(workspaceId).slice(0, limit);
+    }
+    return this.listWorkspaceMemories(workspaceId)
+      .map((memory) => ({
+        memory,
+        score: terms.reduce(
+          (sum, term) => sum + countOccurrences(`${memory.type}\n${memory.content}`.toLowerCase(), term),
+          0
+        )
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((a, b) => b.score - a.score || b.memory.createdAt.localeCompare(a.memory.createdAt))
+      .slice(0, limit)
+      .map((candidate) => candidate.memory);
+  }
+
+  createRunWorkingMemory(runId: string, content: string, budgetChars: number): RunWorkingMemoryRecord {
+    db.prepare(`DELETE FROM run_working_memory WHERE run_id = ?`).run(runId);
+    const id = newId("wm");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO run_working_memory (id, run_id, content, budget_chars, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(id, runId, content.slice(0, budgetChars), budgetChars, at);
+    return this.getRunWorkingMemory(runId)!;
+  }
+
+  getRunWorkingMemory(runId: string): RunWorkingMemoryRecord | null {
+    const row = db
+      .prepare(`SELECT * FROM run_working_memory WHERE run_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(runId) as any;
+    return row
+      ? {
+          id: row.id,
+          runId: row.run_id,
+          content: row.content,
+          budgetChars: row.budget_chars,
+          createdAt: row.created_at
+        }
+      : null;
+  }
+}
+
+function mapWorkspaceMemory(row: any): WorkspaceMemoryRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    type: row.type,
+    content: row.content,
+    sourceRunId: row.source_run_id ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
 }
 
 function mapRun(row: any): RunRecord {

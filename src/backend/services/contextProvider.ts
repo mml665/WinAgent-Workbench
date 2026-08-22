@@ -1,6 +1,12 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import type { RetrievalHit, SkillRecord, WorkspaceRecord } from "../../shared/types";
+import type {
+  RetrievalHit,
+  RunWorkingMemoryRecord,
+  SkillRecord,
+  WorkspaceMemoryRecord,
+  WorkspaceRecord
+} from "../../shared/types";
 import { isPathInside, normalizeHostPath } from "../utils/windowsPaths";
 
 const MAX_FILE_CHARS = 8000;
@@ -13,6 +19,8 @@ export class ContextProvider {
     fileRefs: string[];
     mcpServerNames: string[];
     retrievalHits?: RetrievalHit[];
+    shortTermMemory?: RunWorkingMemoryRecord;
+    longTermMemories?: WorkspaceMemoryRecord[];
     toolResults?: Array<{
       serverName: string;
       toolName: string;
@@ -32,6 +40,18 @@ export class ContextProvider {
     if (input.mcpServerNames.length > 0) {
       sections.push("\n# Available MCP Servers");
       sections.push(input.mcpServerNames.map((name) => `- ${name}`).join("\n"));
+    }
+    if (input.shortTermMemory) {
+      sections.push("\n# Short-Term Memory");
+      sections.push(input.shortTermMemory.content);
+    }
+    if (input.longTermMemories && input.longTermMemories.length > 0) {
+      sections.push("\n# Long-Term Workspace Memory");
+      sections.push(
+        input.longTermMemories
+          .map((memory) => `## ${memory.type}\n${memory.content}`)
+          .join("\n\n")
+      );
     }
     const fileContext = this.readFileRefs(input.workspace, input.fileRefs);
     if (fileContext) {

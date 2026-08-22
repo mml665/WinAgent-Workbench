@@ -8,6 +8,7 @@ import { RunQueue } from "./runQueue";
 import { SkillRegistry } from "./skillRegistry";
 import { WorkspaceIndexService } from "./workspaceIndexService";
 import { McpServerService } from "./mcpServerService";
+import { MemoryService } from "./memoryService";
 
 export class RunService {
   constructor(
@@ -17,6 +18,7 @@ export class RunService {
     private readonly mcpServers: McpServerRepository,
     private readonly skills: SkillRegistry,
     private readonly mcpService: McpServerService,
+    private readonly memory: MemoryService,
     private readonly contextProvider: ContextProvider,
     private readonly workspaceIndex: WorkspaceIndexService,
     private readonly processManager: AgentProcessManager,
@@ -46,6 +48,7 @@ export class RunService {
       .filter((event) => event.type === "run.error.delta")
       .map((event) => String((event.payload as any).text ?? ""))
       .join("");
+    const workingMemory = this.memory.getRunWorkingMemory(runId);
     const eventTable = events
       .map((event) => `| ${event.sequence} | ${event.type} | ${event.createdAt} |`)
       .join("\n");
@@ -66,6 +69,12 @@ export class RunService {
       "",
       "```text",
       run.prompt,
+      "```",
+      "",
+      "## Short-Term Working Memory",
+      "",
+      "```text",
+      workingMemory?.content.trim() || "(empty)",
       "```",
       "",
       "## Events",
@@ -163,6 +172,11 @@ export class RunService {
     const retrievalHits = run.retrievalQuery
       ? this.workspaceIndex.search(workspace.id, run.retrievalQuery, 5)
       : this.workspaceIndex.search(workspace.id, run.prompt, 5);
+    const longTermMemories = this.memory.searchLongTerm(
+      workspace.id,
+      run.retrievalQuery || run.prompt,
+      5
+    );
     const toolResults = [];
     for (const request of toolCalls) {
       const server = this.mcpServers.get(request.serverId);
@@ -204,6 +218,13 @@ export class RunService {
       fileRefs,
       mcpServerNames: mcpNames,
       retrievalHits,
+      shortTermMemory: this.memory.buildWorkingMemory({
+        run,
+        retrievalHits,
+        toolResults,
+        longTermMemories
+      }),
+      longTermMemories,
       toolResults
     });
     const started = Date.now();
@@ -232,11 +253,12 @@ export class RunService {
         settled = true;
         clearTimeout(timeout);
         const endedAt = nowIso();
-        this.runs.updateStatus(run.id, "failed", {
+        const failed = this.runs.updateStatus(run.id, "failed", {
           endedAt,
           durationMs: Date.now() - started,
           summary: error.message
         });
+        this.memory.rememberRunOutcome(failed);
         this.events.publish(run.id, "run.failed", { error: error.message, endedAt });
         this.queue.complete(running);
       },
@@ -267,12 +289,13 @@ export class RunService {
           });
           return;
         }
-        this.runs.updateStatus(run.id, status, {
+        const finished = this.runs.updateStatus(run.id, status, {
           endedAt,
           exitCode: code,
           durationMs,
           summary: summarize(output, stderr)
         });
+        this.memory.rememberRunOutcome(finished);
         if (status === "completed") {
           this.events.publish(run.id, "run.completed", { code, endedAt, durationMs });
         } else if (status === "cancelled") {

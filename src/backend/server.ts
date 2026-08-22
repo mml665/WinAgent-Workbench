@@ -1,6 +1,7 @@
 import http from "node:http";
 import {
   AgentRepository,
+  MemoryRepository,
   McpServerRepository,
   RunRepository,
   WorkspaceIndexRepository,
@@ -17,6 +18,7 @@ import { RunService } from "./services/runService";
 import { SkillRegistry } from "./services/skillRegistry";
 import { WorkspaceService } from "./services/workspaceService";
 import { WorkspaceIndexService } from "./services/workspaceIndexService";
+import { MemoryService } from "./services/memoryService";
 import { WebSocketGateway } from "./websocketGateway";
 
 const workspaceRepo = new WorkspaceRepository();
@@ -24,17 +26,20 @@ const agentRepo = new AgentRepository();
 const runRepo = new RunRepository();
 const mcpRepo = new McpServerRepository();
 const workspaceIndexRepo = new WorkspaceIndexRepository();
+const memoryRepo = new MemoryRepository();
 
 const events = new EventBus(runRepo);
 const skills = new SkillRegistry();
 const workspaceIndex = new WorkspaceIndexService(workspaceRepo, workspaceIndexRepo);
 const mcpServers = new McpServerService(mcpRepo);
+const memory = new MemoryService(memoryRepo, runRepo);
 const services = {
   workspaces: new WorkspaceService(workspaceRepo),
   agents: new AgentConfigService(agentRepo),
   skills,
   mcpServers,
   workspaceIndex,
+  memory,
   runs: new RunService(
     runRepo,
     workspaceRepo,
@@ -42,6 +47,7 @@ const services = {
     mcpRepo,
     skills,
     mcpServers,
+    memory,
     new ContextProvider(),
     workspaceIndex,
     new AgentProcessManager(),

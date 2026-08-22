@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
+import type { MemoryType } from "../shared/types";
 import type { AgentConfigService } from "./services/agentConfigService";
 import type { McpServerService } from "./services/mcpServerService";
+import type { MemoryService } from "./services/memoryService";
 import type { RunService } from "./services/runService";
 import type { SkillRegistry } from "./services/skillRegistry";
 import type { WorkspaceService } from "./services/workspaceService";
@@ -13,6 +15,7 @@ export interface HttpServices {
   skills: SkillRegistry;
   mcpServers: McpServerService;
   workspaceIndex: WorkspaceIndexService;
+  memory: MemoryService;
   runs: RunService;
 }
 
@@ -121,6 +124,28 @@ export async function handleApi(
       );
       return;
     }
+    const memoriesMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/memories$/);
+    if (req.method === "GET" && memoriesMatch) {
+      sendJson(res, 200, services.memory.listWorkspaceMemories(memoriesMatch[1]));
+      return;
+    }
+    if (req.method === "POST" && memoriesMatch) {
+      const body = await readJson<{ type?: MemoryType; content?: string }>(req);
+      const type = body.type ?? "fact";
+      if (!isMemoryType(type)) {
+        throw new Error(`Unsupported memory type: ${String(type)}`);
+      }
+      sendJson(
+        res,
+        200,
+        services.memory.createWorkspaceMemory({
+          workspaceId: memoriesMatch[1],
+          type,
+          content: body.content ?? ""
+        })
+      );
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/runs") {
       sendJson(res, 200, services.runs.list());
       return;
@@ -143,6 +168,11 @@ export async function handleApi(
       );
       return;
     }
+    const workingMemoryMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/working-memory$/);
+    if (req.method === "GET" && workingMemoryMatch) {
+      sendJson(res, 200, services.memory.getRunWorkingMemory(workingMemoryMatch[1]));
+      return;
+    }
     const exportMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/export$/);
     if (req.method === "GET" && exportMatch) {
       sendJson(res, 200, { markdown: services.runs.exportMarkdown(exportMatch[1]) });
@@ -159,6 +189,10 @@ function required(value: string | null, name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+function isMemoryType(value: string): value is MemoryType {
+  return ["fact", "preference", "decision", "issue", "command", "run_summary"].includes(value);
 }
 
 async function readJson<T>(req: IncomingMessage): Promise<T> {

@@ -119,11 +119,31 @@ db.exec(`
     UNIQUE(workspace_id, path)
   );
 
+  CREATE TABLE IF NOT EXISTS workspace_memories (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS run_working_memory (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    budget_chars INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS idx_runs_workspace ON runs(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, sequence);
   CREATE INDEX IF NOT EXISTS idx_workspace_index_workspace ON workspace_index(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_server ON mcp_tool_calls(server_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_workspace_memories_workspace ON workspace_memories(workspace_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_run_working_memory_run ON run_working_memory(run_id, created_at);
 `);
 
 for (const migration of [
