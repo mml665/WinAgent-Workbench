@@ -58,6 +58,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS mcp_tool_calls (
     id TEXT PRIMARY KEY,
     server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
     tool_name TEXT NOT NULL,
     arguments_json TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -130,7 +131,8 @@ for (const migration of [
   "ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE runs ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE runs ADD COLUMN timeout_ms INTEGER NOT NULL DEFAULT 120000",
-  "ALTER TABLE runs ADD COLUMN retrieval_query TEXT"
+  "ALTER TABLE runs ADD COLUMN retrieval_query TEXT",
+  "ALTER TABLE mcp_tool_calls ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE SET NULL"
 ]) {
   try {
     db.exec(migration);
@@ -140,3 +142,5 @@ for (const migration of [
     }
   }
 }
+
+db.exec("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_run ON mcp_tool_calls(run_id, created_at)");

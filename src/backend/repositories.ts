@@ -238,14 +238,14 @@ export class McpServerRepository {
     }));
   }
 
-  createToolCall(serverId: string, toolName: string, args: unknown): McpToolCallRecord {
+  createToolCall(serverId: string, toolName: string, args: unknown, runId?: string): McpToolCallRecord {
     const id = newId("call");
     const at = nowIso();
     db.prepare(
       `INSERT INTO mcp_tool_calls (
-        id, server_id, tool_name, arguments_json, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, serverId, toolName, JSON.stringify(args ?? {}), "running", at, at);
+        id, server_id, run_id, tool_name, arguments_json, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, serverId, runId ?? null, toolName, JSON.stringify(args ?? {}), "running", at, at);
     return this.toolCalls().find((call) => call.id === id)!;
   }
 
@@ -275,6 +275,7 @@ export class McpServerRepository {
     return rows.map((row: any) => ({
       id: row.id,
       serverId: row.server_id,
+      runId: row.run_id ?? undefined,
       toolName: row.tool_name,
       arguments: parseJson<unknown>(row.arguments_json),
       status: row.status,

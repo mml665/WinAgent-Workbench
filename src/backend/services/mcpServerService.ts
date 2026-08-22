@@ -65,7 +65,12 @@ export class McpServerService {
     return server ? this.servers.updateStatus(serverId, "stopped") : server!;
   }
 
-  async callTool(serverId: string, toolName: string, args: unknown): Promise<McpToolCallRecord> {
+  async callTool(
+    serverId: string,
+    toolName: string,
+    args: unknown,
+    options: { runId?: string } = {}
+  ): Promise<McpToolCallRecord> {
     const server = this.servers.get(serverId);
     if (!server) {
       throw new Error(`MCP server not found: ${serverId}`);
@@ -74,7 +79,7 @@ export class McpServerService {
     if (!session) {
       throw new Error(`MCP server is not running: ${server.name}`);
     }
-    const call = this.servers.createToolCall(serverId, toolName, args ?? {});
+    const call = this.servers.createToolCall(serverId, toolName, args ?? {}, options.runId);
     try {
       const result = await session.callTool(toolName, args ?? {});
       return this.servers.completeToolCall(call.id, result);

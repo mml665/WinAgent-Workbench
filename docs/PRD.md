@@ -31,6 +31,7 @@ The product is not a generic chatbot. It is a local runtime host that makes Agen
    - Run MCP `initialize` and `tools/list`.
    - Persist discovered tools and lifecycle errors.
    - Call MCP tools and persist arguments, result, status, and error.
+   - Attach selected MCP tool calls to a Run and inject the results before Agent execution.
    - Keep lifecycle management separate from Agent process execution.
 
 6. Context Provider
@@ -49,7 +50,10 @@ The product is not a generic chatbot. It is a local runtime host that makes Agen
    - Store workspaces, agents, runs, run events, file references, and MCP servers in SQLite.
    - Restore history after application restart.
 
-9. Windows validation
+9. Run artifact export
+   - Export a Run as Markdown with metadata, event timeline, stdout, and stderr.
+
+10. Windows validation
    - Cover paths with spaces, Chinese paths, PowerShell execution, cancellation, failed commands, and restart recovery.
 
 ## Non-goals

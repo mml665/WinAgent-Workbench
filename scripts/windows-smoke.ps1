@@ -105,8 +105,13 @@ try {
       retrievalQuery = "Space Path Smoke"
       timeoutMs = 30000
       maxRetries = 0
+      toolCalls = @(@{
+          serverId = $mcp.id
+          toolName = "echo_context"
+          arguments = @{ text = "WINAGENT_TOOL_ASSIST_OK" }
+        })
       fileRefs = @((Join-Path $spaceRoot "README.md"))
-    } | ConvertTo-Json)
+    } | ConvertTo-Json -Depth 8)
 
   $runStatus = $null
   $deadline = (Get-Date).AddSeconds(20)
@@ -124,6 +129,18 @@ try {
   $output = ($events | Where-Object { $_.type -eq "run.output.delta" } | ForEach-Object { $_.payload.text }) -join ""
   if ($output -notmatch "WINAGENT_DONE") {
     throw "Expected demo Agent output was not observed"
+  }
+  if ($output -notmatch "WINAGENT_TOOL_ASSIST_OK") {
+    throw "Expected tool-assisted context was not injected into Agent output"
+  }
+  $runToolEvent = $events | Where-Object { $_.type -eq "run.tool.called" } | Select-Object -First 1
+  if (-not $runToolEvent) {
+    throw "Expected run.tool.called event was not recorded"
+  }
+
+  $export = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/runs/$($run.id)/export" -Method Get
+  if ($export.markdown -notmatch "Run Report" -or $export.markdown -notmatch $run.id) {
+    throw "Run export did not include report metadata"
   }
 
   $failingAgent = Invoke-RestMethod `
@@ -168,6 +185,7 @@ try {
   Write-Host "     run:       $($run.id)"
   Write-Host "     mcp tool:  echo_context"
   Write-Host "     tool call: $($toolCall.status)"
+  Write-Host "     run tool:  $($runToolEvent.payload.toolName)"
   Write-Host "     indexed:   $($indexResult.indexed)"
 } finally {
   Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue

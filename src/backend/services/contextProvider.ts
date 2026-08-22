@@ -13,6 +13,13 @@ export class ContextProvider {
     fileRefs: string[];
     mcpServerNames: string[];
     retrievalHits?: RetrievalHit[];
+    toolResults?: Array<{
+      serverName: string;
+      toolName: string;
+      status: string;
+      result?: unknown;
+      error?: string;
+    }>;
   }): string {
     const sections: string[] = [];
     sections.push("# Workspace");
@@ -38,6 +45,22 @@ export class ContextProvider {
           .map(
             (hit) =>
               `## ${path.relative(input.workspace.rootPath, hit.path)}\nScore: ${hit.score}\n\`\`\`\n${hit.snippet}\n\`\`\``
+          )
+          .join("\n\n")
+      );
+    }
+    if (input.toolResults && input.toolResults.length > 0) {
+      sections.push("\n# MCP Tool Results");
+      sections.push(
+        input.toolResults
+          .map((tool) =>
+            [
+              `## ${tool.serverName}.${tool.toolName}`,
+              `Status: ${tool.status}`,
+              "```json",
+              JSON.stringify(tool.result ?? { error: tool.error }, null, 2),
+              "```"
+            ].join("\n")
           )
           .join("\n\n")
       );

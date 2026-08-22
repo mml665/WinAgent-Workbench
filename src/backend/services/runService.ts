@@ -1,4 +1,4 @@
-import type { RunRecord } from "../../shared/types";
+import type { RunRecord, RunToolCallRequest } from "../../shared/types";
 import { EventBus } from "../eventBus";
 import { AgentRepository, McpServerRepository, RunRepository, WorkspaceRepository } from "../repositories";
 import { nowIso } from "../utils/time";
@@ -7,6 +7,7 @@ import { ContextProvider } from "./contextProvider";
 import { RunQueue } from "./runQueue";
 import { SkillRegistry } from "./skillRegistry";
 import { WorkspaceIndexService } from "./workspaceIndexService";
+import { McpServerService } from "./mcpServerService";
 
 export class RunService {
   constructor(
@@ -15,6 +16,7 @@ export class RunService {
     private readonly agents: AgentRepository,
     private readonly mcpServers: McpServerRepository,
     private readonly skills: SkillRegistry,
+    private readonly mcpService: McpServerService,
     private readonly contextProvider: ContextProvider,
     private readonly workspaceIndex: WorkspaceIndexService,
     private readonly processManager: AgentProcessManager,
@@ -30,6 +32,62 @@ export class RunService {
     return this.runs.events(runId).filter((event) => event.sequence > afterSequence);
   }
 
+  exportMarkdown(runId: string): string {
+    const run = this.runs.get(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    const events = this.runs.events(runId);
+    const stdout = events
+      .filter((event) => event.type === "run.output.delta")
+      .map((event) => String((event.payload as any).text ?? ""))
+      .join("");
+    const stderr = events
+      .filter((event) => event.type === "run.error.delta")
+      .map((event) => String((event.payload as any).text ?? ""))
+      .join("");
+    const eventTable = events
+      .map((event) => `| ${event.sequence} | ${event.type} | ${event.createdAt} |`)
+      .join("\n");
+    return [
+      `# Run Report: ${run.title}`,
+      "",
+      `- Run ID: ${run.id}`,
+      `- Status: ${run.status}`,
+      `- Attempt: ${run.attempt}/${run.maxRetries + 1}`,
+      `- Timeout: ${run.timeoutMs} ms`,
+      `- Created: ${run.createdAt}`,
+      `- Started: ${run.startedAt ?? "-"}`,
+      `- Ended: ${run.endedAt ?? "-"}`,
+      `- Duration: ${run.durationMs ?? "-"} ms`,
+      `- Exit code: ${run.exitCode ?? "-"}`,
+      "",
+      "## Prompt",
+      "",
+      "```text",
+      run.prompt,
+      "```",
+      "",
+      "## Events",
+      "",
+      "| Seq | Type | Time |",
+      "| --- | --- | --- |",
+      eventTable,
+      "",
+      "## Stdout",
+      "",
+      "```text",
+      stdout.trim() || "(empty)",
+      "```",
+      "",
+      "## Stderr",
+      "",
+      "```text",
+      stderr.trim() || "(empty)",
+      "```"
+    ].join("\n");
+  }
+
   create(input: {
     workspaceId: string;
     agentId: string;
@@ -40,6 +98,7 @@ export class RunService {
     maxRetries?: number;
     timeoutMs?: number;
     retrievalQuery?: string;
+    toolCalls?: RunToolCallRequest[];
   }): RunRecord {
     const workspace = this.workspaces.get(input.workspaceId);
     const agent = this.agents.get(input.agentId);
@@ -64,7 +123,9 @@ export class RunService {
     this.events.publish(run.id, "run.status.changed", { status: "queued" });
     this.queue.enqueue({
       run,
-      execute: () => this.execute(run.id, input.fileRefs ?? [])
+      execute: () => {
+        void this.execute(run.id, input.fileRefs ?? [], input.toolCalls ?? []);
+      }
     });
     return run;
   }
@@ -86,7 +147,7 @@ export class RunService {
     return run;
   }
 
-  private execute(runId: string, fileRefs: string[]): void {
+  private async execute(runId: string, fileRefs: string[], toolCalls: RunToolCallRequest[]): Promise<void> {
     const run = this.runs.get(runId);
     if (!run || run.status === "cancelled") {
       return;
@@ -102,13 +163,48 @@ export class RunService {
     const retrievalHits = run.retrievalQuery
       ? this.workspaceIndex.search(workspace.id, run.retrievalQuery, 5)
       : this.workspaceIndex.search(workspace.id, run.prompt, 5);
+    const toolResults = [];
+    for (const request of toolCalls) {
+      const server = this.mcpServers.get(request.serverId);
+      let toolResult;
+      let callId: string | undefined;
+      try {
+        const call = await this.mcpService.callTool(request.serverId, request.toolName, request.arguments, {
+          runId: run.id
+        });
+        callId = call.id;
+        toolResult = {
+          serverName: server?.name ?? request.serverId,
+          toolName: request.toolName,
+          status: call.status,
+          result: call.result,
+          error: call.error
+        };
+      } catch (error) {
+        toolResult = {
+          serverName: server?.name ?? request.serverId,
+          toolName: request.toolName,
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error)
+        };
+      }
+      toolResults.push(toolResult);
+      this.events.publish(run.id, "run.tool.called", {
+        serverId: request.serverId,
+        serverName: toolResult.serverName,
+        toolName: request.toolName,
+        status: toolResult.status,
+        callId
+      });
+    }
     const prompt = this.contextProvider.buildPrompt({
       workspace,
       skill,
       prompt: run.prompt,
       fileRefs,
       mcpServerNames: mcpNames,
-      retrievalHits
+      retrievalHits,
+      toolResults
     });
     const started = Date.now();
     let output = "";
@@ -165,7 +261,9 @@ export class RunService {
           this.queue.complete(running);
           this.queue.enqueue({
             run: retried,
-            execute: () => this.execute(run.id, fileRefs)
+            execute: () => {
+              void this.execute(run.id, fileRefs, toolCalls);
+            }
           });
           return;
         }

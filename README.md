@@ -33,6 +33,8 @@ Implemented:
 
 - Start/stop local MCP stdio servers and persist discovered tools.
 - Invoke MCP tools through `tools/call` and persist arguments/results/errors.
+- Attach MCP tool calls to a Run, execute them before the Agent starts, and inject results into the Agent prompt.
+- Export completed or failed Runs as Markdown reports with metadata, events, stdout, and stderr.
 - Build a lightweight text index for a workspace and search it for retrieval context.
 - Inject skill instructions, explicit files, MCP server names, and retrieval hits into an Agent prompt.
 - Cancel queued or running runs.

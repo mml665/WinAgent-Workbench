@@ -9,6 +9,7 @@ import type {
   RetrievalHit,
   RunEventRecord,
   RunRecord,
+  RunToolCallRequest,
   SkillRecord,
   WorkspaceRecord
 } from "../shared/types";
@@ -55,6 +56,7 @@ function App() {
   const [mcpCommand, setMcpCommand] = useState("node.exe");
   const [mcpArgs, setMcpArgs] = useState("tools/mock-mcp-server.mjs");
   const [toolArguments, setToolArguments] = useState('{"text":"hello from WinAgent"}');
+  const [runToolCalls, setRunToolCalls] = useState<RunToolCallRequest[]>([]);
   const [error, setError] = useState("");
 
   const selectedRun = runs[0];
@@ -186,7 +188,8 @@ function App() {
           fileRefs,
           retrievalQuery,
           timeoutMs,
-          maxRetries
+          maxRetries,
+          toolCalls: runToolCalls
         })
       });
       await refreshRuns();
@@ -251,6 +254,28 @@ function App() {
       }
     );
     await refreshAll();
+  }
+
+  function addToolToRun(tool: McpToolRecord) {
+    setRunToolCalls([
+      ...runToolCalls,
+      {
+        serverId: tool.serverId,
+        toolName: tool.name,
+        arguments: JSON.parse(toolArguments || "{}")
+      }
+    ]);
+  }
+
+  async function exportRun(run: RunRecord) {
+    const result = await api<{ markdown: string }>(`/api/runs/${run.id}/export`);
+    const blob = new Blob([result.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${run.title.replace(/[^\w.-]+/g, "_") || "run"}-${run.id}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   const output = useMemo(
@@ -356,6 +381,7 @@ function App() {
               <li key={tool.id}>
                 {tool.name} <span className="muted">{tool.description}</span>
                 <button onClick={() => void callMcpTool(tool)}>Call</button>
+                <button onClick={() => addToolToRun(tool)}>Use in Run</button>
               </li>
             ))}
           </ul>
@@ -433,6 +459,21 @@ function App() {
               </div>
             ))}
           </div>
+          <h3>Run MCP tools</h3>
+          <div className="tool-call-list">
+            {runToolCalls.length === 0 ? <span className="muted">No pre-run tools selected.</span> : null}
+            {runToolCalls.map((tool, index) => (
+              <div className="tool-call-row" key={`${tool.serverId}-${tool.toolName}-${index}`}>
+                <strong>{tool.toolName}</strong>
+                <pre>{JSON.stringify(tool.arguments, null, 2)}</pre>
+                <button
+                  onClick={() => setRunToolCalls(runToolCalls.filter((_, candidateIndex) => candidateIndex !== index))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
           <label>
             Timeout ms
             <input
@@ -469,6 +510,7 @@ function App() {
                 {run.status === "running" || run.status === "queued" ? (
                   <button onClick={() => void cancelRun(run.id)}>Cancel</button>
                 ) : null}
+                <button onClick={() => void exportRun(run)}>Export</button>
               </div>
             ))}
           </div>

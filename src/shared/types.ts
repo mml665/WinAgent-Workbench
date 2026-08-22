@@ -57,6 +57,7 @@ export interface McpToolRecord {
 export interface McpToolCallRecord {
   id: string;
   serverId: string;
+  runId?: string;
   toolName: string;
   arguments: unknown;
   status: "running" | "completed" | "failed";
@@ -64,6 +65,12 @@ export interface McpToolCallRecord {
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RunToolCallRequest {
+  serverId: string;
+  toolName: string;
+  arguments: unknown;
 }
 
 export interface RunRecord {

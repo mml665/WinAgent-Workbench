@@ -143,6 +143,11 @@ export async function handleApi(
       );
       return;
     }
+    const exportMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/export$/);
+    if (req.method === "GET" && exportMatch) {
+      sendJson(res, 200, { markdown: services.runs.exportMarkdown(exportMatch[1]) });
+      return;
+    }
     sendJson(res, 404, { error: "Not found" });
   } catch (error) {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });

@@ -60,7 +60,11 @@ Stores MCP server command configuration and lifecycle status. V2 starts a stdio 
 
 `ContextProvider`
 
-Builds the final prompt from user prompt, skill instructions, workspace metadata, explicit file references, MCP server names, and retrieved project snippets.
+Builds the final prompt from user prompt, skill instructions, workspace metadata, explicit file references, MCP server names, retrieved project snippets, and pre-run MCP tool results.
+
+`Run Export`
+
+`RunService` can produce a Markdown report for any Run. The report includes lifecycle metadata, event timeline, stdout, and stderr, giving each Agent execution an auditable artifact for review or resume evidence.
 
 `WorkspaceIndexService`
 

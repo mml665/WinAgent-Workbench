@@ -28,11 +28,12 @@ const workspaceIndexRepo = new WorkspaceIndexRepository();
 const events = new EventBus(runRepo);
 const skills = new SkillRegistry();
 const workspaceIndex = new WorkspaceIndexService(workspaceRepo, workspaceIndexRepo);
+const mcpServers = new McpServerService(mcpRepo);
 const services = {
   workspaces: new WorkspaceService(workspaceRepo),
   agents: new AgentConfigService(agentRepo),
   skills,
-  mcpServers: new McpServerService(mcpRepo),
+  mcpServers,
   workspaceIndex,
   runs: new RunService(
     runRepo,
@@ -40,6 +41,7 @@ const services = {
     agentRepo,
     mcpRepo,
     skills,
+    mcpServers,
     new ContextProvider(),
     workspaceIndex,
     new AgentProcessManager(),
