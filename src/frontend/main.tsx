@@ -28,6 +28,7 @@ const apiBase = "http://127.0.0.1:8787";
 const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "command", "run_summary"];
 type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs" | "tasks" | "artifacts" | "references" | "approvals";
 type AgentAppId = "codex" | "claude" | "workbuddy" | "qoder";
+type RuntimeStatus = "checking" | "online" | "degraded" | "offline";
 
 const agentApps: Array<{ id: AgentAppId; label: string; icon: string; description: string }> = [
   {
@@ -143,6 +144,26 @@ function readinessClass(readiness?: AgentReadinessRecord): string {
   return readiness.status;
 }
 
+function runtimeStatusLabel(status: RuntimeStatus): string {
+  if (status === "online") return "Runtime online";
+  if (status === "degraded") return "Runtime degraded";
+  if (status === "offline") return "Runtime offline";
+  return "Checking runtime";
+}
+
+function summarizeRuntimeFailures(failures: string[]): string {
+  if (failures.length === 0) {
+    return "Backend connected. Workspace, Agents, runs, memory, and tools are synced.";
+  }
+  if (failures.every((failure) => /Failed to fetch|Load failed|NetworkError|refused|fetch/i.test(failure))) {
+    return "Backend is not reachable. Existing screen state is preserved while WinAgent retries.";
+  }
+  if (failures.length > 3) {
+    return `${failures.length} runtime APIs failed. Click Retry to reload the workspace state.`;
+  }
+  return failures.join(" · ");
+}
+
 function groupRunsByMessage(runs: RunRecord[]): Array<{ key: string; latest: RunRecord; runs: RunRecord[] }> {
   const groups = new Map<string, { key: string; latest: RunRecord; runs: RunRecord[] }>();
   for (const run of runs) {
@@ -206,6 +227,9 @@ function App() {
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [liveOutputExpanded, setLiveOutputExpanded] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>("checking");
+  const [runtimeMessage, setRuntimeMessage] = useState("Connecting to the local WinAgent runtime.");
+  const [lastRuntimeSyncAt, setLastRuntimeSyncAt] = useState("");
   const [error, setError] = useState("");
 
   const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
@@ -251,6 +275,16 @@ function App() {
   }, [selectedWorkspaceId, agentReadiness.length]);
 
   useEffect(() => {
+    if (runtimeStatus !== "offline") {
+      return;
+    }
+    const retry = window.setInterval(() => {
+      void refreshAll();
+    }, 5000);
+    return () => window.clearInterval(retry);
+  }, [runtimeStatus]);
+
+  useEffect(() => {
     if (selectedRun) {
       void loadRunEvents(selectedRun.id);
       void loadWorkingMemory(selectedRun.id);
@@ -271,29 +305,54 @@ function App() {
   }, [runs]);
 
   useEffect(() => {
-    const ws = new WebSocket("ws://127.0.0.1:8787/ws");
-    ws.onmessage = (message) => {
-      const envelope = JSON.parse(String(message.data)) as WebSocketEnvelope;
-      if (envelope.kind === "run.event" && envelope.event) {
-        const event = envelope.event;
-        setEvents((previous) => ({
-          ...previous,
-          [event.runId]: [
-            ...(previous[event.runId] ?? []),
-            {
-              id: event.id,
-              runId: event.runId,
-              sequence: event.sequence,
-              type: event.type,
-              payload: event.payload,
-              createdAt: event.createdAt
-            }
-          ]
-        }));
+    let closed = false;
+    let retryTimer: number | undefined;
+    let socket: WebSocket | null = null;
+
+    const connect = () => {
+      socket = new WebSocket("ws://127.0.0.1:8787/ws");
+      socket.onopen = () => {
         void refreshRuns();
-      }
+      };
+      socket.onmessage = (message) => {
+        const envelope = JSON.parse(String(message.data)) as WebSocketEnvelope;
+        if (envelope.kind === "run.event" && envelope.event) {
+          const event = envelope.event;
+          setEvents((previous) => ({
+            ...previous,
+            [event.runId]: [
+              ...(previous[event.runId] ?? []),
+              {
+                id: event.id,
+                runId: event.runId,
+                sequence: event.sequence,
+                type: event.type,
+                payload: event.payload,
+                createdAt: event.createdAt
+              }
+            ]
+          }));
+          void refreshRuns();
+        }
+      };
+      socket.onclose = () => {
+        if (!closed) {
+          retryTimer = window.setTimeout(connect, 3000);
+        }
+      };
+      socket.onerror = () => {
+        socket?.close();
+      };
     };
-    return () => ws.close();
+
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+      }
+      socket?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -360,7 +419,13 @@ function App() {
         failures.push(`memories: ${caught instanceof Error ? caught.message : String(caught)}`);
       }
     }
-    setError(failures.length > 0 ? `Runtime partially loaded. ${failures.join("; ")}` : "");
+    const offline = failures.length >= 6 && failures.every((failure) => /Failed to fetch|Load failed|NetworkError|refused|fetch/i.test(failure));
+    setRuntimeStatus(failures.length === 0 ? "online" : offline ? "offline" : "degraded");
+    setRuntimeMessage(summarizeRuntimeFailures(failures));
+    setLastRuntimeSyncAt(new Date().toLocaleTimeString());
+    if (failures.length === 0 && error.startsWith("Runtime")) {
+      setError("");
+    }
   }
 
   async function refreshRuns() {
@@ -781,14 +846,26 @@ function App() {
           </div>
         </div>
         <div className="workspace-status">
+          <span className={`status-pill runtime ${runtimeStatus}`}>{runtimeStatusLabel(runtimeStatus)}</span>
           <button className="glass-button" onClick={() => void refreshAll()}>
             Refresh
           </button>
-          <span className="status-pill">{runningRuns.length} running</span>
-          <span className="status-pill">{failedRuns.length} waiting</span>
+          <span className="status-pill">{allRunningRuns.length} running</span>
+          <span className="status-pill">{allFailedRuns.length} waiting</span>
           <span className="status-pill">{activeMcpServers} MCP online</span>
         </div>
       </header>
+
+      {runtimeStatus !== "online" ? (
+        <section className={`runtime-banner ${runtimeStatus}`} role="status">
+          <div>
+            <strong>{runtimeStatusLabel(runtimeStatus)}</strong>
+            <p>{runtimeMessage}</p>
+            {lastRuntimeSyncAt ? <small>Last check: {lastRuntimeSyncAt}</small> : null}
+          </div>
+          <button onClick={() => void refreshAll()}>Retry now</button>
+        </section>
+      ) : null}
 
       {error ? <div className="toast-error">{error}</div> : null}
 
