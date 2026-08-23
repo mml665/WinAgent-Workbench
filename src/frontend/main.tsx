@@ -86,6 +86,32 @@ function compactRunMessage(run: RunRecord): string {
   return cleaned.length > 140 ? `${cleaned.slice(0, 137)}...` : cleaned;
 }
 
+function runAnswer(run: RunRecord, events: RunEventRecord[] = []): string {
+  const stdout = events
+    .filter((event) => event.type === "run.output.delta")
+    .map((event) => String((event.payload as any).text ?? ""))
+    .join("")
+    .trim();
+  if (stdout) {
+    return stdout;
+  }
+  if (run.status === "completed" && run.summary?.trim()) {
+    return run.summary.trim();
+  }
+  return "";
+}
+
+function runDisplayMessage(run: RunRecord, events: RunEventRecord[] = []): string {
+  const answer = runAnswer(run, events);
+  if (answer) {
+    return answer;
+  }
+  if (run.status === "running" || run.status === "queued") {
+    return "Agent is working. The answer will appear here automatically.";
+  }
+  return compactRunMessage(run);
+}
+
 function messageStatusLabel(status: RunRecord["status"]): string {
   if (status === "failed") return "Action needed";
   if (status === "running" || status === "queued") return "Running";
@@ -142,8 +168,8 @@ function App() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filePath, setFilePath] = useState("");
   const [fileRefs, setFileRefs] = useState<string[]>([]);
-  const [title, setTitle] = useState("Smoke run");
-  const [prompt, setPrompt] = useState("Summarize this workspace and print WINAGENT_DONE.");
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
   const [retrievalQuery, setRetrievalQuery] = useState("workspace agent runtime");
   const [retrievalHits, setRetrievalHits] = useState<RetrievalHit[]>([]);
   const [timeoutMs, setTimeoutMs] = useState(120000);
@@ -191,6 +217,16 @@ function App() {
       setWorkingMemory(null);
     }
   }, [selectedRun?.id, selectedRun?.status]);
+
+  useEffect(() => {
+    if (!runs.some((run) => run.status === "queued" || run.status === "running")) {
+      return;
+    }
+    const poll = window.setInterval(() => {
+      void refreshRuns();
+    }, 2000);
+    return () => window.clearInterval(poll);
+  }, [runs]);
 
   useEffect(() => {
     const ws = new WebSocket("ws://127.0.0.1:8787/ws");
@@ -332,13 +368,14 @@ function App() {
 
   async function createRun() {
     try {
+      const nextTitle = title.trim() || prompt.trim().slice(0, 48) || "Untitled run";
       await api<RunRecord>("/api/runs", {
         method: "POST",
         body: JSON.stringify({
           workspaceId: selectedWorkspaceId,
           agentId: selectedAgentId,
           skillId: selectedSkillId || undefined,
-          title,
+          title: nextTitle,
           prompt,
           fileRefs,
           retrievalQuery,
@@ -348,6 +385,7 @@ function App() {
         })
       });
       await refreshRuns();
+      setTitle("");
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -458,6 +496,7 @@ function App() {
         .join(""),
     [selectedEvents]
   );
+  const selectedAnswer = selectedRun ? runAnswer(selectedRun, selectedEvents) : "";
 
   const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
@@ -675,7 +714,7 @@ function App() {
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
                   onFocus={() => setCommandPaletteOpen(false)}
-                  placeholder="Describe the goal, use @ for agents/apps, or + to attach references."
+                  placeholder="Ask the Agent what you need. The answer will appear below automatically."
                 />
 
                 <div className="reference-chips">
@@ -711,10 +750,15 @@ function App() {
                       </option>
                     ))}
                   </select>
-                  <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Run title" />
+                  <input
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    aria-label="Run title"
+                    placeholder="Optional title"
+                  />
                   <button
                     className="send-button"
-                    disabled={!selectedWorkspaceId || !selectedAgentId}
+                    disabled={!selectedWorkspaceId || !selectedAgentId || !prompt.trim()}
                     onClick={() => void createRun()}
                   >
                     Send
@@ -739,7 +783,16 @@ function App() {
                     <strong>{selectedRun?.title ?? "No run selected"}</strong>
                     <span>{selectedRun ? messageStatusLabel(selectedRun.status) : "Idle"}</span>
                   </div>
-                  <p>{selectedRun ? compactRunMessage(selectedRun) : "Start a run or open run details from the message center."}</p>
+                  {selectedRun ? (
+                    <div className="answer-card">
+                      <small>You asked</small>
+                      <p>{selectedRun.prompt}</p>
+                      <small>Agent answer</small>
+                      <p>{runDisplayMessage(selectedRun, selectedEvents)}</p>
+                    </div>
+                  ) : (
+                    <p>Start a run or open run details from the message center.</p>
+                  )}
                   <div className="message-actions">
                     <button disabled={!selectedRun} onClick={() => selectedRun ? openRunDetails(selectedRun) : undefined}>
                       Open details
@@ -1105,8 +1158,10 @@ function App() {
               ))}
             </div>
             <div className="preview-pane">
-              <h3>Selected run context</h3>
-              <pre>{workingMemory?.content ?? output ?? "No run selected."}</pre>
+              <h3>Selected run answer</h3>
+              <pre>{selectedAnswer || output || "No run selected."}</pre>
+              <h3>Working memory</h3>
+              <pre>{workingMemory?.content ?? "No working memory for the selected run yet."}</pre>
             </div>
           </div>
         ) : null}

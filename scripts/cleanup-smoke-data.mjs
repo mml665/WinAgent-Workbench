@@ -32,7 +32,9 @@ const smokeWorkspaceIds = db
     `SELECT id FROM workspaces
      WHERE root_path LIKE '%\\.tmp\\space path'
         OR root_path LIKE '%\\.tmp\\中文路径'
-        OR root_path LIKE '%\\.tmp\\acceptance-workspace'`
+        OR root_path LIKE '%\\.tmp\\acceptance-workspace'
+        OR root_path LIKE '%\\.tmp\\acceptance-debug'
+        OR root_path LIKE '%\\.tmp\\diag-workspace'`
   )
   .all()
   .map((row) => row.id);

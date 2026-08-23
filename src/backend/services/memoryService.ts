@@ -7,6 +7,7 @@ import type {
 import { MemoryRepository, RunRepository } from "../repositories";
 
 const WORKING_MEMORY_BUDGET_CHARS = 8000;
+const EXACT_RESPONSE_PATTERN = /\b(reply|respond|print|output)\s+with\s+exactly\b|只(?:回复|输出)|精确(?:回复|输出)/i;
 
 export class MemoryService {
   constructor(
@@ -47,10 +48,11 @@ export class MemoryService {
     toolResults: Array<{ serverName: string; toolName: string; status: string; result?: unknown; error?: string }>;
     longTermMemories: WorkspaceMemoryRecord[];
   }): RunWorkingMemoryRecord {
+    const shouldIsolateRecentRuns = EXACT_RESPONSE_PATTERN.test(input.run.prompt);
     const recentRuns = this.runs
       .listByWorkspace(input.run.workspaceId, 6)
       .filter((run) => run.id !== input.run.id && run.summary)
-      .slice(0, 3);
+      .slice(0, shouldIsolateRecentRuns ? 0 : 3);
     const content = [
       "# Short-Term Working Memory",
       "",

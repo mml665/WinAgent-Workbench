@@ -784,6 +784,34 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.answer-card {
+  display: grid;
+  gap: 7px;
+}
+
+.answer-card small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.answer-card p {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.answer-card small + p:last-child {
+  border-color: rgba(34, 197, 94, 0.20);
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--text-primary);
+}
+
 .control-center {
   display: grid;
   gap: 12px;

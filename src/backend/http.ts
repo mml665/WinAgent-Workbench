@@ -177,6 +177,11 @@ export async function handleApi(
       sendJson(res, 200, services.runs.list());
       return;
     }
+    const runGetMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
+    if (req.method === "GET" && runGetMatch) {
+      sendJson(res, 200, services.runs.get(runGetMatch[1]));
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/runs") {
       sendJson(res, 200, services.runs.create(await readJson(req)));
       return;

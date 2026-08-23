@@ -208,13 +208,13 @@ try {
         fileRefs = @((Join-Path $acceptanceRoot "README.md"))
         toolCalls = @()
       }
+    Assert-True ($run.prompt -eq "Do not edit files. Reply with exactly: WINAGENT_ACCEPTANCE_OK") "Acceptance run was created with the wrong prompt"
 
     $deadline = (Get-Date).AddSeconds(180)
     $runStatus = $null
     do {
       Start-Sleep -Seconds 3
-      $runs = @(Invoke-Api -Path "/api/runs")
-      $runStatus = $runs | Where-Object { $_.id -eq $run.id } | Select-Object -First 1
+      $runStatus = Invoke-Api -Path "/api/runs/$($run.id)"
     } while ($runStatus.status -in @("queued", "running") -and (Get-Date) -lt $deadline)
 
     $summary = ([string]$runStatus.summary).Trim()

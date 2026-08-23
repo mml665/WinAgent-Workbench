@@ -30,6 +30,14 @@ export class RunService {
     return this.runs.list();
   }
 
+  get(runId: string): RunRecord {
+    const run = this.runs.get(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    return run;
+  }
+
   eventsForRun(runId: string, afterSequence = 0) {
     return this.runs.events(runId).filter((event) => event.sequence > afterSequence);
   }
