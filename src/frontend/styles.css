@@ -754,15 +754,46 @@ pre {
 }
 
 .control-center h3 {
-  margin-bottom: 9px;
+  margin-bottom: 8px;
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 600;
 }
 
+.message-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(65, 130, 245, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 10px;
+}
+
+.metric-card strong {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.metric-card span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.metric-card.attention {
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(255, 236, 232, 0.74);
+}
+
 .message-card {
   display: grid;
-  gap: 9px;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.82);
@@ -775,12 +806,54 @@ pre {
 }
 
 .message-card.attention {
-  border-color: rgba(109, 127, 245, 0.22);
-  background: rgba(109, 127, 245, 0.16);
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(255, 247, 246, 0.86);
+}
+
+.message-card.status-running {
+  border-color: rgba(65, 130, 245, 0.22);
+  background: rgba(239, 246, 255, 0.86);
+}
+
+.message-card .card-head span {
+  border-radius: 999px;
+  background: rgba(65, 130, 245, 0.11);
+  color: var(--accent);
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.message-card.attention .card-head span {
+  background: rgba(220, 38, 38, 0.10);
+  color: var(--danger);
+}
+
+.message-meta,
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-meta {
+  flex-wrap: wrap;
+  color: var(--text-tertiary);
+}
+
+.message-actions {
+  justify-content: flex-end;
+}
+
+.message-actions button,
+.message-card.compact button {
+  padding: 7px 9px;
+  border-radius: 9px;
+  font-size: 12px;
 }
 
 .message-card.compact p {
-  max-height: 64px;
+  max-height: 44px;
   overflow: hidden;
 }
 

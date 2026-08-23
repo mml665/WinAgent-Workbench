@@ -9,6 +9,7 @@
 - Windows-style follow-up screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-windows-workbench.png`
 - Hidden-window behavior screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-window-hidden.png`
 - Single-screen workbench screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-single-screen-workbench-final.png`
+- Message center redesign screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-message-center-redesign-clean.png`
 - Viewport: Codex in-app browser desktop viewport, captured full page.
 - Source pixel dimensions: README screenshots are 1600 x 1000.
 - Implementation pixel dimensions: browser-rendered screenshot captured from local Vite app.
@@ -81,6 +82,12 @@ Focused visual regions were checked against the source screenshots:
    - Source check: Tutti's desktop shell uses `h-screen min-h-0 overflow-hidden` at the workspace window level, and the workbench surface uses a bounded `position: relative; min-height: 0; overflow: hidden` container with internal window/dock scrolling instead of browser-page scrolling.
    - Fix: changed WinAgent to a fixed `100vh` desktop shell, bounded the stage and Agent window with `min-height: 0`, made sidebar/message/terminal regions scroll internally, fixed the sidebar row definition from three rows to four rows, and changed the composer toolbar to a two-row grid to avoid horizontal clipping.
    - Post-fix evidence: browser verification returned `documentScrollEqualsViewport: true`, `bodyOverflow: "hidden"`, `toolbarHorizontalOverflow: 0`, `controlCenterHorizontalOverflow: 0`, and non-overlapping sidebar regions. Final screenshot: `E:\WinAgent-Workbench\.tmp\winagent-single-screen-workbench-final.png`.
+
+8. User identified that `Agent messages` looked like a broken page because it displayed raw run logs.
+   - Severity: P1 for information architecture.
+   - Source check: Tutti's message center is built from a session/message-center model (`WorkspaceAgentMessageCenterPanel` and `WorkspaceAgentMessageCenterCard`) that summarizes actionable session state and opens chat/session details on demand. It does not use ambient panels as raw stdout/stderr log lists.
+   - Fix: replaced direct `run` list rendering with grouped message-center items, merged repeated failed runs by title and status, added top-level status metrics, removed raw PowerShell `CategoryInfo` / `FullyQualifiedErrorId` noise, hid internal `Agent received prompt` summaries, and moved detailed inspection behind `Open details` / `Export`.
+   - Post-fix evidence: browser verification returned `cardCount: 2`, `horizontalOverflow: 0`, `hasRawNoise: false`, sections `Needs attention · 1` and `Recent completed · 1`. Final screenshot: `E:\WinAgent-Workbench\.tmp\winagent-message-center-redesign-clean.png`.
 
 ## Required fidelity surfaces
 

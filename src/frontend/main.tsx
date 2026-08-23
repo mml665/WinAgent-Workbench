@@ -60,6 +60,52 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   return value as T;
 }
 
+function runTimestamp(run: RunRecord): number {
+  return Date.parse(run.updatedAt || run.endedAt || run.startedAt || run.createdAt) || 0;
+}
+
+function compactRunMessage(run: RunRecord): string {
+  const source = (run.summary || run.prompt || "No summary yet.").trim();
+  if (/^Agent received prompt:/i.test(source) || source.includes("# Short-Term Memo")) {
+    return run.status === "completed"
+      ? "Run completed. Open details to review the result."
+      : "Agent run is ready. Open details to review the workspace context.";
+  }
+  const cleaned = source
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\+ CategoryInfo\s*:.*$/i, "")
+    .replace(/\+ FullyQualifiedErrorId\s*:.*$/i, "")
+    .replace(/# Workspace Root:.*?(?=# Available|# Short|$)/i, "")
+    .replace(/# Available MCP Servers.*?(?=# Short|# Prompt|$)/i, "")
+    .trim();
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137)}...` : cleaned;
+}
+
+function messageStatusLabel(status: RunRecord["status"]): string {
+  if (status === "failed") return "Action needed";
+  if (status === "running" || status === "queued") return "Running";
+  if (status === "completed") return "Done";
+  return status;
+}
+
+function groupRunsByMessage(runs: RunRecord[]): Array<{ key: string; latest: RunRecord; runs: RunRecord[] }> {
+  const groups = new Map<string, { key: string; latest: RunRecord; runs: RunRecord[] }>();
+  for (const run of runs) {
+    const key = `${run.status}:${run.title.trim() || "Untitled run"}`;
+    const group = groups.get(key);
+    if (!group) {
+      groups.set(key, { key, latest: run, runs: [run] });
+      continue;
+    }
+    group.runs.push(run);
+    if (runTimestamp(run) > runTimestamp(group.latest)) {
+      group.latest = run;
+    }
+  }
+  return [...groups.values()].sort((left, right) => runTimestamp(right.latest) - runTimestamp(left.latest));
+}
+
 function App() {
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
@@ -371,10 +417,14 @@ function App() {
   const activeAgentProfile = agents.find((agent) =>
     agent.name.toLowerCase().includes(activeAgentApp.label.toLowerCase())
   );
-  const runningRuns = runs.filter((run) => run.status === "running" || run.status === "queued");
-  const attentionRuns = runs.filter((run) => run.status === "failed").slice(0, 4);
-  const completedRuns = runs.filter((run) => run.status === "completed").slice(0, 4);
-  const recentRuns = runs.slice(0, 8);
+  const sortedRuns = [...runs].sort((left, right) => runTimestamp(right) - runTimestamp(left));
+  const runningRuns = sortedRuns.filter((run) => run.status === "running" || run.status === "queued");
+  const failedRuns = sortedRuns.filter((run) => run.status === "failed");
+  const completedRuns = sortedRuns.filter((run) => run.status === "completed");
+  const attentionGroups = groupRunsByMessage(failedRuns).slice(0, 3);
+  const runningGroups = groupRunsByMessage(runningRuns).slice(0, 3);
+  const completedGroups = groupRunsByMessage(completedRuns).slice(0, 2);
+  const recentRuns = sortedRuns.slice(0, 8);
   const visibleMcpServers = mcpServers.slice(0, 6);
   const visibleMcpTools = mcpTools.slice(0, 8);
   const visibleToolCalls = mcpToolCalls.slice(0, 5);
@@ -395,6 +445,12 @@ function App() {
     if (profile) {
       setSelectedAgentId(profile.id);
     }
+  }
+
+  function openRunDetails(run: RunRecord) {
+    void loadRunEvents(run.id);
+    void loadWorkingMemory(run.id);
+    setActiveWindow("runs");
   }
 
   async function createAgentProfile(appId: AgentAppId) {
@@ -438,7 +494,7 @@ function App() {
             Refresh
           </button>
           <span className="status-pill">{runningRuns.length} running</span>
-          <span className="status-pill">{attentionRuns.length} waiting</span>
+          <span className="status-pill">{failedRuns.length} waiting</span>
           <span className="status-pill">{activeMcpServers} MCP online</span>
         </div>
       </header>
@@ -629,44 +685,76 @@ function App() {
         <aside className="control-center">
           <div className="control-head">
             <h2>Agent messages</h2>
-            <button onClick={() => setActiveWindow("runs")}>Filter</button>
+            <button onClick={() => setActiveWindow("runs")}>Open Runs</button>
           </div>
 
+          <section className="message-overview" aria-label="Run status summary">
+            <div className="metric-card attention">
+              <strong>{failedRuns.length}</strong>
+              <span>Need review</span>
+            </div>
+            <div className="metric-card">
+              <strong>{runningRuns.length}</strong>
+              <span>Running</span>
+            </div>
+            <div className="metric-card">
+              <strong>{completedRuns.length}</strong>
+              <span>Completed</span>
+            </div>
+          </section>
+
           <section>
-            <h3>Needs attention · {attentionRuns.length}</h3>
-            {attentionRuns.length === 0 ? <p className="empty-state">No failed runs waiting.</p> : null}
-            {attentionRuns.map((run) => (
-              <div className="message-card attention" key={run.id}>
+            <h3>Needs attention · {attentionGroups.length}</h3>
+            {attentionGroups.length === 0 ? <p className="empty-state">No failed runs waiting.</p> : null}
+            {attentionGroups.map((group) => (
+              <div className="message-card attention" key={group.key}>
                 <div className="card-head">
-                  <strong>{run.title}</strong>
-                  <span>{run.status}</span>
+                  <strong>{group.latest.title}</strong>
+                  <span>{messageStatusLabel(group.latest.status)}</span>
                 </div>
-                <p>{run.summary || run.prompt}</p>
-                <button onClick={() => void exportRun(run)}>Export report</button>
+                <p>{compactRunMessage(group.latest)}</p>
+                <div className="message-meta">
+                  <small>{group.runs.length > 1 ? `${group.runs.length} related runs` : "Latest failure"}</small>
+                  <small>{group.latest.exitCode !== null && group.latest.exitCode !== undefined ? `exit ${group.latest.exitCode}` : "no exit code"}</small>
+                </div>
+                <div className="message-actions">
+                  <button onClick={() => openRunDetails(group.latest)}>Open details</button>
+                  <button onClick={() => void exportRun(group.latest)}>Export</button>
+                </div>
               </div>
             ))}
           </section>
 
-          <section>
-            <h3>Running · {runningRuns.length}</h3>
-            {runningRuns.map((run) => (
-              <div className="message-card" key={run.id}>
+          {runningGroups.length > 0 ? (
+            <section>
+              <h3>Running · {runningGroups.length}</h3>
+              {runningGroups.map((group) => (
+              <div className="message-card status-running" key={group.key}>
                 <div className="card-head">
-                  <strong>{run.title}</strong>
-                  <span>{run.status}</span>
+                  <strong>{group.latest.title}</strong>
+                  <span>{messageStatusLabel(group.latest.status)}</span>
                 </div>
-                <p>{run.prompt}</p>
-                <button onClick={() => void cancelRun(run.id)}>Cancel</button>
+                <p>{compactRunMessage(group.latest)}</p>
+                <div className="message-actions">
+                  <button onClick={() => openRunDetails(group.latest)}>Open details</button>
+                  <button onClick={() => void cancelRun(group.latest.id)}>Cancel</button>
+                </div>
               </div>
-            ))}
-          </section>
+              ))}
+            </section>
+          ) : null}
 
           <section>
-            <h3>Completed · {completedRuns.length}</h3>
-            {completedRuns.map((run) => (
-              <div className="message-card compact" key={run.id}>
-                <strong>{run.title}</strong>
-                <p>{run.summary || "No summary"}</p>
+            <h3>Recent completed · {completedGroups.length}</h3>
+            {completedGroups.length === 0 ? <p className="empty-state">No completed runs yet.</p> : null}
+            {completedGroups.map((group) => (
+              <div className="message-card compact" key={group.key}>
+                <div className="card-head">
+                  <strong>{group.latest.title}</strong>
+                  <span>{messageStatusLabel(group.latest.status)}</span>
+                </div>
+                <p>{compactRunMessage(group.latest)}</p>
+                <button onClick={() => openRunDetails(group.latest)}>Open details</button>
               </div>
             ))}
           </section>
