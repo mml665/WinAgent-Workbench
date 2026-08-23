@@ -173,6 +173,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (selectedWorkspaceId && selectedAgentId && agentReadiness.length > 0) {
+      return;
+    }
+    const retry = window.setInterval(() => {
+      void refreshAll();
+    }, 3000);
+    return () => window.clearInterval(retry);
+  }, [selectedWorkspaceId, selectedAgentId, agentReadiness.length]);
+
+  useEffect(() => {
     if (selectedRun) {
       void loadRunEvents(selectedRun.id);
       void loadWorkingMemory(selectedRun.id);
@@ -218,43 +228,58 @@ function App() {
   }, [selectedWorkspaceId, filePath]);
 
   async function refreshAll() {
-    try {
-      const [
-        nextWorkspaces,
-        nextAgents,
-        nextAgentReadiness,
-        nextSkills,
-        nextMcp,
-        nextTools,
-        nextToolCalls,
-        nextRuns
-      ] = await Promise.all([
-        api<WorkspaceRecord[]>("/api/workspaces"),
-        api<AgentRecord[]>("/api/agents"),
-        api<AgentReadinessRecord[]>("/api/agent-readiness"),
-        api<SkillRecord[]>("/api/skills"),
-        api<McpServerRecord[]>("/api/mcp-servers"),
-        api<McpToolRecord[]>("/api/mcp-tools"),
-        api<McpToolCallRecord[]>("/api/mcp-tool-calls"),
-        api<RunRecord[]>("/api/runs")
-      ]);
-      setWorkspaces(nextWorkspaces);
-      setAgents(nextAgents);
-      setAgentReadiness(nextAgentReadiness);
-      setSkills(nextSkills);
-      setMcpServers(nextMcp);
-      setMcpTools(nextTools);
-      setMcpToolCalls(nextToolCalls);
-      setRuns(nextRuns);
-      const nextWorkspaceId = selectedWorkspaceId || nextWorkspaces[0]?.id || "";
-      setSelectedWorkspaceId((current) => current || nextWorkspaceId);
-      setSelectedAgentId((current) => current || nextAgents[0]?.id || "");
-      if (nextWorkspaceId) {
-        setWorkspaceMemories(await api<WorkspaceMemoryRecord[]>(`/api/workspaces/${nextWorkspaceId}/memories`));
+    const failures: string[] = [];
+    const load = async <T,>(label: string, path: string, fallback: T): Promise<T> => {
+      try {
+        return await api<T>(path);
+      } catch (caught) {
+        failures.push(`${label}: ${caught instanceof Error ? caught.message : String(caught)}`);
+        return fallback;
       }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+    };
+    const [
+      nextWorkspaces,
+      nextAgents,
+      nextAgentReadiness,
+      nextSkills,
+      nextMcp,
+      nextTools,
+      nextToolCalls,
+      nextRuns
+    ] = await Promise.all([
+      load<WorkspaceRecord[]>("workspaces", "/api/workspaces", workspaces),
+      load<AgentRecord[]>("agents", "/api/agents", agents),
+      load<AgentReadinessRecord[]>("agent readiness", "/api/agent-readiness", agentReadiness),
+      load<SkillRecord[]>("skills", "/api/skills", skills),
+      load<McpServerRecord[]>("mcp servers", "/api/mcp-servers", mcpServers),
+      load<McpToolRecord[]>("mcp tools", "/api/mcp-tools", mcpTools),
+      load<McpToolCallRecord[]>("mcp calls", "/api/mcp-tool-calls", mcpToolCalls),
+      load<RunRecord[]>("runs", "/api/runs", runs)
+    ]);
+    setWorkspaces(nextWorkspaces);
+    setAgents(nextAgents);
+    setAgentReadiness(nextAgentReadiness);
+    setSkills(nextSkills);
+    setMcpServers(nextMcp);
+    setMcpTools(nextTools);
+    setMcpToolCalls(nextToolCalls);
+    setRuns(nextRuns);
+    const nextWorkspaceId = nextWorkspaces.some((workspace) => workspace.id === selectedWorkspaceId)
+      ? selectedWorkspaceId
+      : nextWorkspaces[0]?.id || "";
+    const nextAgentId = nextAgents.some((agent) => agent.id === selectedAgentId)
+      ? selectedAgentId
+      : nextAgents[0]?.id || "";
+    setSelectedWorkspaceId(nextWorkspaceId);
+    setSelectedAgentId(nextAgentId);
+    if (nextWorkspaceId) {
+      try {
+        setWorkspaceMemories(await api<WorkspaceMemoryRecord[]>(`/api/workspaces/${nextWorkspaceId}/memories`));
+      } catch (caught) {
+        failures.push(`memories: ${caught instanceof Error ? caught.message : String(caught)}`);
+      }
     }
+    setError(failures.length > 0 ? `Runtime partially loaded. ${failures.join("; ")}` : "");
   }
 
   async function refreshRuns() {
