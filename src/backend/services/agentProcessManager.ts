@@ -12,11 +12,12 @@ export class AgentProcessManager {
   private readonly processes = new Map<string, ChildProcessWithoutNullStreams>();
 
   start(run: RunRecord, agent: AgentRecord, prompt: string, callbacks: ProcessRunCallbacks): void {
+    const useShell = shouldRunThroughWindowsShell(agent.command);
     const child = spawn(agent.command, agent.args, {
       cwd: agent.cwd || run.cwd,
       env: { ...process.env, ...agent.env },
       windowsHide: true,
-      shell: false
+      shell: useShell
     });
     this.processes.set(run.id, child);
     child.stdout.setEncoding("utf8");
@@ -39,4 +40,13 @@ export class AgentProcessManager {
     child.kill();
     return true;
   }
+}
+
+function shouldRunThroughWindowsShell(command: string): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  return ["qodercli", "qodercli.cmd", "codebuddy", "codebuddy.cmd", "cbc", "cbc.cmd"].includes(
+    command.toLowerCase()
+  );
 }

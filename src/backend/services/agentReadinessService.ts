@@ -55,6 +55,7 @@ const defaultAdapters: Array<{
       cliMode: "print",
       commandCandidates: ["qodercli", "qoder"],
       headlessHelpFlags: ["--print", "-p"],
+      authStatusArgs: ["status"],
       installHint: "Install Qoder CLI with: irm https://qoder.com/install.ps1 | iex"
     }
   },
@@ -74,6 +75,7 @@ const defaultAdapters: Array<{
       productAlias: "WorkBuddy",
       commandCandidates: ["codebuddy", "cbc"],
       headlessHelpFlags: ["--print", "-p"],
+      authLoginHint: "Run codebuddy login before using CodeBuddy as an Agent.",
       installHint: "Install CodeBuddy CLI with: npm install -g @tencent-ai/codebuddy-code"
     }
   }
@@ -263,9 +265,14 @@ export class AgentReadinessService {
       supportsStreaming: true,
       recommendedArgs: adapter.defaultArgs,
       profileId: profile?.id,
-      message: profile
-        ? `${adapter.label} is ready and has a runnable profile.`
-        : `${adapter.label} is installed and can be provisioned as a runnable profile.`
+      message: [
+        profile
+          ? `${adapter.label} is ready and has a runnable profile.`
+          : `${adapter.label} is installed and can be provisioned as a runnable profile.`,
+        stringValue(adapter.capabilities.authLoginHint)
+      ]
+        .filter(Boolean)
+        .join(" ")
     };
   }
 }
@@ -304,7 +311,7 @@ function supportsRequiredHelpFlag(command: string, flags: string[]): boolean {
   const result = spawnSync(command, ["--help"], {
     encoding: "utf8",
     windowsHide: true,
-    shell: false,
+    shell: shouldRunThroughWindowsShell(command),
     timeout: 5000
   });
   const help = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
@@ -315,10 +322,16 @@ function inspectAuth(command: string, args: string[]): { ready: true } | { ready
   const result = spawnSync(command, args, {
     encoding: "utf8",
     windowsHide: true,
-    shell: false,
+    shell: shouldRunThroughWindowsShell(command),
     timeout: 5000
   });
   const raw = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+  if (/not logged in|authentication required|please .*login|sign in/i.test(raw)) {
+    return {
+      ready: false,
+      message: `${command} is installed but not authenticated. Run "${command} login" or configure its access token before using it as an Agent.`
+    };
+  }
   try {
     const parsed = JSON.parse(raw) as { loggedIn?: boolean; authMethod?: string; apiProvider?: string };
     if (parsed.loggedIn === false) {
@@ -336,10 +349,21 @@ function inspectAuth(command: string, args: string[]): { ready: true } | { ready
   if (result.status !== 0) {
     return {
       ready: false,
-      message: raw || `${command} authentication status check failed.`
+      message:
+        raw ||
+        `${command} is installed but authentication status could not be confirmed. Run "${command} login" before using it as an Agent.`
     };
   }
   return { ready: true };
+}
+
+function shouldRunThroughWindowsShell(command: string): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  return ["qodercli", "qodercli.cmd", "codebuddy", "codebuddy.cmd", "cbc", "cbc.cmd"].includes(
+    command.toLowerCase()
+  );
 }
 
 function findCommand(command: string): string | undefined {
