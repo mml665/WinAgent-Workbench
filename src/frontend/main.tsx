@@ -66,6 +66,12 @@ function runTimestamp(run: RunRecord): number {
 
 function compactRunMessage(run: RunRecord): string {
   const source = (run.summary || run.prompt || "No summary yet.").trim();
+  if (
+    run.status === "failed" &&
+    /Write-Error|ErrorException|CategoryInfo|FullyQualifiedErrorId|exit\s+\d+/i.test(source)
+  ) {
+    return "Run failed during execution. Open details to inspect logs.";
+  }
   if (/^Agent received prompt:/i.test(source) || source.includes("# Short-Term Memo")) {
     return run.status === "completed"
       ? "Run completed. Open details to review the result."
@@ -144,6 +150,7 @@ function App() {
   const [activeAgentAppId, setActiveAgentAppId] = useState<AgentAppId>("codex");
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [liveOutputExpanded, setLiveOutputExpanded] = useState(false);
   const [error, setError] = useState("");
 
   const selectedRun = runs[0];
@@ -157,6 +164,7 @@ function App() {
     if (selectedRun) {
       void loadRunEvents(selectedRun.id);
       void loadWorkingMemory(selectedRun.id);
+      setLiveOutputExpanded(false);
     } else {
       setWorkingMemory(null);
     }
@@ -670,12 +678,27 @@ function App() {
                 </div>
               </div>
 
-              <div className="live-terminal">
-                <div>
-                  <strong>Live Output</strong>
-                  <span>{selectedRun ? `${selectedRun.title} · ${selectedRun.status}` : "No active run"}</span>
+              <div className={liveOutputExpanded ? "live-terminal expanded" : "live-terminal collapsed"}>
+                <div className="live-terminal-head">
+                  <strong>Run activity</strong>
+                  <span>{selectedRun ? `${selectedRun.title} · ${messageStatusLabel(selectedRun.status)}` : "No active run"}</span>
                 </div>
-                <pre>{output || "No run output yet."}</pre>
+                <div className="run-activity-card">
+                  <div className="card-head">
+                    <strong>{selectedRun?.title ?? "No run selected"}</strong>
+                    <span>{selectedRun ? messageStatusLabel(selectedRun.status) : "Idle"}</span>
+                  </div>
+                  <p>{selectedRun ? compactRunMessage(selectedRun) : "Start a run or open run details from the message center."}</p>
+                  <div className="message-actions">
+                    <button disabled={!selectedRun} onClick={() => selectedRun ? openRunDetails(selectedRun) : undefined}>
+                      Open details
+                    </button>
+                    <button disabled={!output} onClick={() => setLiveOutputExpanded((expanded) => !expanded)}>
+                      {liveOutputExpanded ? "Hide logs" : "Show logs"}
+                    </button>
+                  </div>
+                </div>
+                {liveOutputExpanded ? <pre>{output || "No run output yet."}</pre> : null}
               </div>
             </section>
           </div>

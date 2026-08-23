@@ -693,10 +693,15 @@ pre {
 
 .live-terminal {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
   overflow: hidden;
+}
+
+.live-terminal.collapsed {
+  grid-template-rows: auto auto;
+  align-content: start;
 }
 
 .live-terminal pre {
@@ -705,7 +710,7 @@ pre {
   min-height: 0;
 }
 
-.live-terminal > div,
+.live-terminal-head,
 .card-head,
 .memory-row > div,
 .run-row > div,
@@ -716,8 +721,32 @@ pre {
   gap: 10px;
 }
 
-.live-terminal > div span {
+.live-terminal-head span {
   color: var(--text-tertiary);
+}
+
+.run-activity-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(65, 130, 245, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(65, 130, 245, 0.10);
+}
+
+.run-activity-card .card-head span {
+  border-radius: 999px;
+  background: rgba(65, 130, 245, 0.11);
+  color: var(--accent);
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.run-activity-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .control-center {

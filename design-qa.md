@@ -10,6 +10,7 @@
 - Hidden-window behavior screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-window-hidden.png`
 - Single-screen workbench screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-single-screen-workbench-final.png`
 - Message center redesign screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-message-center-redesign-clean.png`
+- No-code foreground screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-no-code-foreground-clean.png`
 - Viewport: Codex in-app browser desktop viewport, captured full page.
 - Source pixel dimensions: README screenshots are 1600 x 1000.
 - Implementation pixel dimensions: browser-rendered screenshot captured from local Vite app.
@@ -88,6 +89,11 @@ Focused visual regions were checked against the source screenshots:
    - Source check: Tutti's message center is built from a session/message-center model (`WorkspaceAgentMessageCenterPanel` and `WorkspaceAgentMessageCenterCard`) that summarizes actionable session state and opens chat/session details on demand. It does not use ambient panels as raw stdout/stderr log lists.
    - Fix: replaced direct `run` list rendering with grouped message-center items, merged repeated failed runs by title and status, added top-level status metrics, removed raw PowerShell `CategoryInfo` / `FullyQualifiedErrorId` noise, hid internal `Agent received prompt` summaries, and moved detailed inspection behind `Open details` / `Export`.
    - Post-fix evidence: browser verification returned `cardCount: 2`, `horizontalOverflow: 0`, `hasRawNoise: false`, sections `Needs attention · 1` and `Recent completed · 1`. Final screenshot: `E:\WinAgent-Workbench\.tmp\winagent-message-center-redesign-clean.png`.
+
+9. User identified that code and terminal logs should not be displayed in the foreground.
+   - Severity: P1 for end-user experience.
+   - Fix: replaced the default `Live Output` terminal block with a `Run activity` summary card. Raw `<pre>` logs are no longer mounted by default and are available only through the explicit `Show logs` action or the `Runs` details window.
+   - Post-fix evidence: browser verification returned `visiblePreCount: 0`, `liveTerminalClass: "live-terminal collapsed"`, `hasRawLogNoise: false`, and foreground summaries no longer contain `Write-Error`, `Microsoft.PowerShell`, `CategoryInfo`, or `FullyQualifiedErrorId`. Final screenshot: `E:\WinAgent-Workbench\.tmp\winagent-no-code-foreground-clean.png`.
 
 ## Required fidelity surfaces
 
