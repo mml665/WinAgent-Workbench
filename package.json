@@ -14,7 +14,8 @@
     "build:desktop": "npm run build",
     "preview:desktop": "concurrently -k -n backend,electron \"npm:dev:backend\" \"wait-on http://127.0.0.1:8787/api/health && npx --yes electron@37.2.6 . --built\"",
     "test": "node --test --import tsx tests/*.test.ts",
-    "smoke:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-smoke.ps1"
+    "smoke:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-smoke.ps1",
+    "cleanup:mock": "node scripts/cleanup-smoke-data.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",

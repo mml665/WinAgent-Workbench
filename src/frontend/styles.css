@@ -415,6 +415,41 @@ pre {
   font-weight: 800;
 }
 
+.agent-readiness {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 9px 10px;
+}
+
+.agent-readiness strong {
+  font-size: 12px;
+}
+
+.agent-readiness span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.agent-readiness.ready {
+  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.10);
+}
+
+.agent-readiness.launcher,
+.agent-readiness.unsupported {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.10);
+}
+
+.agent-readiness.missing {
+  border-color: rgba(220, 38, 38, 0.20);
+  background: rgba(220, 38, 38, 0.08);
+}
+
 .sidebar-section span {
   color: var(--text-tertiary);
   font-size: 11px;

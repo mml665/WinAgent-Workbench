@@ -25,6 +25,20 @@ export interface AgentRecord {
   updatedAt: string;
 }
 
+export type AgentRuntimeStatus = "ready" | "launcher" | "missing" | "unsupported";
+
+export interface AgentReadinessRecord {
+  id: string;
+  label: string;
+  command: string;
+  status: AgentRuntimeStatus;
+  installedPath?: string;
+  supportsStreaming: boolean;
+  recommendedArgs: string[];
+  profileId?: string;
+  message: string;
+}
+
 export interface SkillRecord {
   id: string;
   name: string;

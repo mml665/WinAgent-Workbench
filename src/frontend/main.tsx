@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type {
+  AgentReadinessRecord,
   AgentRecord,
   FileEntry,
   McpServerRecord,
@@ -24,27 +25,24 @@ const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "c
 type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs";
 type AgentAppId = "codex" | "workbuddy" | "qoder";
 
-const agentApps: Array<{ id: AgentAppId; label: string; icon: string; command: string; description: string }> = [
+const agentApps: Array<{ id: AgentAppId; label: string; icon: string; description: string }> = [
   {
     id: "codex",
     label: "Codex",
     icon: "C",
-    command: "codex",
-    description: "Open a Codex-compatible local Agent session."
+    description: "Run non-interactive Codex tasks inside this workspace."
   },
   {
     id: "workbuddy",
     label: "WorkBuddy",
     icon: "W",
-    command: "workbuddy",
-    description: "Open a WorkBuddy Agent profile in this workspace."
+    description: "Use a WorkBuddy-compatible Agent when its CLI is installed."
   },
   {
     id: "qoder",
     label: "Qoder",
     icon: "Q",
-    command: "qoder",
-    description: "Open a Qoder Agent profile in this workspace."
+    description: "Launch or connect Qoder when a streaming Agent adapter is available."
   }
 ];
 
@@ -95,6 +93,19 @@ function messageStatusLabel(status: RunRecord["status"]): string {
   return status;
 }
 
+function readinessLabel(readiness?: AgentReadinessRecord): string {
+  if (!readiness) return "Checking";
+  if (readiness.status === "ready") return readiness.profileId ? "Ready" : "Can install";
+  if (readiness.status === "launcher") return "Launcher only";
+  if (readiness.status === "missing") return "Not installed";
+  return "Unsupported";
+}
+
+function readinessClass(readiness?: AgentReadinessRecord): string {
+  if (!readiness) return "unknown";
+  return readiness.status;
+}
+
 function groupRunsByMessage(runs: RunRecord[]): Array<{ key: string; latest: RunRecord; runs: RunRecord[] }> {
   const groups = new Map<string, { key: string; latest: RunRecord; runs: RunRecord[] }>();
   for (const run of runs) {
@@ -115,6 +126,7 @@ function groupRunsByMessage(runs: RunRecord[]): Array<{ key: string; latest: Run
 function App() {
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [agentReadiness, setAgentReadiness] = useState<AgentReadinessRecord[]>([]);
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerRecord[]>([]);
   const [mcpTools, setMcpTools] = useState<McpToolRecord[]>([]);
@@ -136,9 +148,9 @@ function App() {
   const [retrievalHits, setRetrievalHits] = useState<RetrievalHit[]>([]);
   const [timeoutMs, setTimeoutMs] = useState(120000);
   const [maxRetries, setMaxRetries] = useState(0);
-  const [mcpName, setMcpName] = useState("Mock MCP");
+  const [mcpName, setMcpName] = useState("Local MCP");
   const [mcpCommand, setMcpCommand] = useState("node.exe");
-  const [mcpArgs, setMcpArgs] = useState("tools/mock-mcp-server.mjs");
+  const [mcpArgs, setMcpArgs] = useState("");
   const [toolArguments, setToolArguments] = useState('{"text":"hello from WinAgent"}');
   const [runToolCalls, setRunToolCalls] = useState<RunToolCallRequest[]>([]);
   const [memoryType, setMemoryType] = useState<MemoryType>("fact");
@@ -210,6 +222,7 @@ function App() {
       const [
         nextWorkspaces,
         nextAgents,
+        nextAgentReadiness,
         nextSkills,
         nextMcp,
         nextTools,
@@ -218,6 +231,7 @@ function App() {
       ] = await Promise.all([
         api<WorkspaceRecord[]>("/api/workspaces"),
         api<AgentRecord[]>("/api/agents"),
+        api<AgentReadinessRecord[]>("/api/agent-readiness"),
         api<SkillRecord[]>("/api/skills"),
         api<McpServerRecord[]>("/api/mcp-servers"),
         api<McpToolRecord[]>("/api/mcp-tools"),
@@ -226,6 +240,7 @@ function App() {
       ]);
       setWorkspaces(nextWorkspaces);
       setAgents(nextAgents);
+      setAgentReadiness(nextAgentReadiness);
       setSkills(nextSkills);
       setMcpServers(nextMcp);
       setMcpTools(nextTools);
@@ -422,9 +437,10 @@ function App() {
   const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const activeAgentApp = agentApps.find((app) => app.id === activeAgentAppId) ?? agentApps[0];
-  const activeAgentProfile = agents.find((agent) =>
-    agent.name.toLowerCase().includes(activeAgentApp.label.toLowerCase())
-  );
+  const activeAgentReadiness = agentReadiness.find((item) => item.id === activeAgentApp.id);
+  const activeAgentProfile = activeAgentReadiness?.profileId
+    ? agents.find((agent) => agent.id === activeAgentReadiness.profileId)
+    : agents.find((agent) => agent.name.toLowerCase() === activeAgentApp.label.toLowerCase());
   const sortedRuns = [...runs].sort((left, right) => runTimestamp(right) - runTimestamp(left));
   const runningRuns = sortedRuns.filter((run) => run.status === "running" || run.status === "queued");
   const failedRuns = sortedRuns.filter((run) => run.status === "failed");
@@ -449,7 +465,10 @@ function App() {
     const app = agentApps.find((candidate) => candidate.id === appId) ?? agentApps[0];
     setActiveAgentAppId(app.id);
     setAgentWindowOpen(true);
-    const profile = agents.find((agent) => agent.name.toLowerCase().includes(app.label.toLowerCase()));
+    const readiness = agentReadiness.find((item) => item.id === app.id);
+    const profile = readiness?.profileId
+      ? agents.find((agent) => agent.id === readiness.profileId)
+      : agents.find((agent) => agent.name.toLowerCase() === app.label.toLowerCase());
     if (profile) {
       setSelectedAgentId(profile.id);
     }
@@ -464,13 +483,10 @@ function App() {
   async function createAgentProfile(appId: AgentAppId) {
     const app = agentApps.find((candidate) => candidate.id === appId) ?? agentApps[0];
     try {
-      const agent = await api<AgentRecord>("/api/agents", {
+      const agent = await api<AgentRecord>("/api/agents/provision", {
         method: "POST",
         body: JSON.stringify({
-          name: app.label,
-          command: app.command,
-          args: [],
-          env: {},
+          id: appId,
           cwd: selectedWorkspace?.rootPath
         })
       });
@@ -565,17 +581,27 @@ function App() {
                     </button>
                   ))}
                 </div>
+                <div className={`agent-readiness ${readinessClass(activeAgentReadiness)}`}>
+                  <strong>{readinessLabel(activeAgentReadiness)}</strong>
+                  <span>{activeAgentReadiness?.message ?? "Checking local Agent runtime."}</span>
+                </div>
                 <select value={selectedAgentId} onChange={(event) => setSelectedAgentId(event.target.value)}>
+                  <option value="">No runnable profile</option>
                   {agents.map((agent) => (
                     <option key={agent.id} value={agent.id}>
                       {agent.name}
                     </option>
                   ))}
                 </select>
-                <small>{selectedAgent ? `${selectedAgent.command} ${selectedAgent.args.join(" ")}` : "No Agent"}</small>
-                {!activeAgentProfile ? (
+                <small>{selectedAgent ? `${selectedAgent.name} is selected for this run.` : "Install or select a runnable Agent profile."}</small>
+                {!activeAgentProfile && activeAgentReadiness?.status === "ready" ? (
                   <button className="profile-action" onClick={() => void createAgentProfile(activeAgentApp.id)}>
                     Create {activeAgentApp.label} profile
+                  </button>
+                ) : null}
+                {activeAgentReadiness && activeAgentReadiness.status !== "ready" ? (
+                  <button className="profile-action" disabled>
+                    {readinessLabel(activeAgentReadiness)}
                   </button>
                 ) : null}
               </div>
@@ -883,12 +909,17 @@ function App() {
         {activeWindow === "apps" ? (
           <div className="app-market">
             {agentApps.map((app) => (
-              <button className="app-card agent-app-card" key={app.id} onClick={() => openAgentApp(app.id)}>
-                <span className="app-icon">{app.icon}</span>
-                <strong>{app.label}</strong>
-                <p>{app.description}</p>
-                <small>{activeAgentAppId === app.id && agentWindowOpen ? "Running" : "Open"}</small>
-              </button>
+              (() => {
+                const readiness = agentReadiness.find((item) => item.id === app.id);
+                return (
+                  <button className="app-card agent-app-card" key={app.id} onClick={() => openAgentApp(app.id)}>
+                    <span className="app-icon">{app.icon}</span>
+                    <strong>{app.label}</strong>
+                    <p>{app.description}</p>
+                    <small>{activeAgentAppId === app.id && agentWindowOpen ? "Open" : readinessLabel(readiness)}</small>
+                  </button>
+                );
+              })()
             ))}
             {[
               ["Task Center", "Break goals into sub-tasks and send them to agents.", "Open"],

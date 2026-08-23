@@ -125,24 +125,6 @@ export class AgentRepository {
     );
     return this.get(id)!;
   }
-
-  ensureDefault(): void {
-    if (this.list().length > 0) {
-      return;
-    }
-    this.create({
-      name: "PowerShell Demo Agent",
-      command: "powershell.exe",
-      args: [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "$prompt = [Console]::In.ReadToEnd(); Write-Output 'Agent received prompt:'; Write-Output $prompt; Write-Output 'WINAGENT_DONE'"
-      ],
-      env: {}
-    });
-  }
 }
 
 export class McpServerRepository {

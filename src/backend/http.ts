@@ -58,8 +58,16 @@ export async function handleApi(
       sendJson(res, 200, services.agents.list());
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/agent-readiness") {
+      sendJson(res, 200, services.agents.readinessList());
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/agents") {
       sendJson(res, 200, services.agents.create(await readJson(req)));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/agents/provision") {
+      sendJson(res, 200, services.agents.provision(await readJson(req)));
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/skills") {

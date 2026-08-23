@@ -7,6 +7,9 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $spaceRoot = Join-Path $repoRoot ".tmp\space path"
 $unicodeRoot = Join-Path $repoRoot ".tmp\中文路径"
+Push-Location $repoRoot
+node.exe scripts/cleanup-smoke-data.mjs | Out-Host
+Pop-Location
 New-Item -ItemType Directory -Force -Path $spaceRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $unicodeRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $spaceRoot "README.md") -Value "# Space Path Smoke" -Encoding utf8
@@ -103,10 +106,22 @@ try {
     throw "Long-term memory was not persisted"
   }
 
-  $agents = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/agents" -Method Get
-  $agent = @($agents) |
-    Where-Object { $_.name -eq "PowerShell Demo Agent" } |
-    Select-Object -First 1
+  $agent = Invoke-RestMethod `
+    -Uri "http://127.0.0.1:$Port/api/agents" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body (@{
+      name = "Smoke PowerShell Agent"
+      command = "powershell.exe"
+      args = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "`$prompt = [Console]::In.ReadToEnd(); Write-Output 'Smoke Agent received prompt:'; Write-Output `$prompt; Write-Output 'WINAGENT_DONE'"
+      )
+      env = @{}
+    } | ConvertTo-Json)
   $run = Invoke-RestMethod `
     -Uri "http://127.0.0.1:$Port/api/runs" `
     -Method Post `
@@ -220,4 +235,7 @@ try {
   Write-Host "     memory:    $($manualMemory.type) + run_summary"
 } finally {
   Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
+  Push-Location $repoRoot
+  node.exe scripts/cleanup-smoke-data.mjs | Out-Host
+  Pop-Location
 }
