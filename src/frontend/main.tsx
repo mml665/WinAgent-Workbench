@@ -29,6 +29,7 @@ const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "c
 type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs" | "tasks" | "artifacts" | "references" | "approvals";
 type AgentAppId = "codex" | "claude" | "workbuddy" | "qoder";
 type RuntimeStatus = "checking" | "online" | "degraded" | "offline";
+type MentionCategory = "sessions" | "files" | "tasks" | "apps" | "agents";
 
 const agentApps: Array<{ id: AgentAppId; label: string; icon: string; description: string }> = [
   {
@@ -55,6 +56,14 @@ const agentApps: Array<{ id: AgentAppId; label: string; icon: string; descriptio
     icon: "Q",
     description: "Launch or connect Qoder when a streaming Agent adapter is available."
   }
+];
+
+const mentionCategories: Array<{ id: MentionCategory; label: string }> = [
+  { id: "sessions", label: "Sessions" },
+  { id: "files", label: "Files" },
+  { id: "tasks", label: "Tasks" },
+  { id: "apps", label: "Apps" },
+  { id: "agents", label: "Agents" }
 ];
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -208,6 +217,8 @@ function App() {
   const [prompt, setPrompt] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
+  const [goalText, setGoalText] = useState("");
+  const [plannedTasks, setPlannedTasks] = useState<Array<{ title: string; description: string }>>([]);
   const [retrievalQuery, setRetrievalQuery] = useState("workspace agent runtime");
   const [retrievalHits, setRetrievalHits] = useState<RetrievalHit[]>([]);
   const [timeoutMs, setTimeoutMs] = useState(120000);
@@ -226,6 +237,8 @@ function App() {
   const [activeAgentAppId, setActiveAgentAppId] = useState<AgentAppId>("codex");
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [mentionCategory, setMentionCategory] = useState<MentionCategory>("sessions");
+  const [mentionQuery, setMentionQuery] = useState("");
   const [liveOutputExpanded, setLiveOutputExpanded] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>("checking");
   const [runtimeMessage, setRuntimeMessage] = useState("Connecting to the local WinAgent runtime.");
@@ -259,6 +272,9 @@ function App() {
   const selectedEvents = selectedRun ? events[selectedRun.id] ?? [] : [];
   const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
   const openTasks = tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled");
+  const readyAgentTargets = agentApps
+    .map((app) => ({ app, profile: profileForAgentApp(app.id) }))
+    .filter((target): target is { app: (typeof agentApps)[number]; profile: AgentRecord } => Boolean(target.profile));
 
   useEffect(() => {
     void refreshAll();
@@ -700,6 +716,26 @@ function App() {
     setReferencePickerOpen(false);
   }
 
+  function appendMention(label: string, uri: string) {
+    appendPromptToken(`@[${label}](${uri})`);
+  }
+
+  function mentionUri(kind: string, id: string): string {
+    const params = new URLSearchParams();
+    if (selectedWorkspaceId) {
+      params.set("workspaceId", selectedWorkspaceId);
+    }
+    return `mention://winagent/${kind}/${encodeURIComponent(id)}${params.toString() ? `?${params.toString()}` : ""}`;
+  }
+
+  function workspaceReferenceUri(reference: WorkspaceReferenceRecord): string {
+    const params = new URLSearchParams({
+      source: reference.kind,
+      workspaceId: reference.workspaceId
+    });
+    return `mention://workspace-reference/${encodeURIComponent(reference.id)}?${params.toString()}`;
+  }
+
   function agentLabelForRun(run: RunRecord): string {
     const agent = agents.find((item) => item.id === run.agentId);
     if (!agent) {
@@ -718,12 +754,7 @@ function App() {
   }
 
   function handoffTargetsForRun(run: RunRecord): Array<{ app: (typeof agentApps)[number]; profile: AgentRecord }> {
-    return agentApps
-      .map((app) => ({ app, profile: profileForAgentApp(app.id) }))
-      .filter(
-        (target): target is { app: (typeof agentApps)[number]; profile: AgentRecord } =>
-          Boolean(target.profile) && target.profile?.id !== run.agentId
-      );
+    return readyAgentTargets.filter((target) => target.profile.id !== run.agentId);
   }
 
   function handoffPrompt(sourceRun: RunRecord, sourceEvents: RunEventRecord[], targetLabel: string): string {
@@ -810,6 +841,186 @@ function App() {
     void loadRunEvents(run.id);
     void loadWorkingMemory(run.id);
     setActiveWindow("runs");
+  }
+
+  function mentionItems(): Array<{
+    key: string;
+    label: string;
+    description: string;
+    action: () => void;
+  }> {
+    const query = mentionQuery.trim().toLowerCase();
+    const matches = (value: string) => !query || value.toLowerCase().includes(query);
+    const items: Array<{ key: string; label: string; description: string; action: () => void }> = [];
+    if (mentionCategory === "sessions") {
+      for (const run of sortedRuns.slice(0, 12)) {
+        const label = `${agentLabelForRun(run)} · ${run.title}`;
+        if (!matches(`${label} ${run.prompt} ${run.summary ?? ""}`)) continue;
+        items.push({
+          key: run.id,
+          label,
+          description: compactRunMessage(run),
+          action: () => appendMention(label, mentionUri("run", run.id))
+        });
+      }
+    }
+    if (mentionCategory === "files") {
+      for (const file of files.slice(0, 16)) {
+        const label = file.name;
+        if (!matches(`${label} ${file.path}`)) continue;
+        items.push({
+          key: file.path,
+          label,
+          description: file.path,
+          action: () => {
+            if (file.kind === "directory") {
+              setFilePath(file.path);
+              return;
+            }
+            if (!fileRefs.includes(file.path)) {
+              setFileRefs((current) => [...current, file.path]);
+            }
+            appendMention(label, mentionUri("file", file.path));
+          }
+        });
+      }
+    }
+    if (mentionCategory === "tasks") {
+      for (const task of tasks.slice(0, 16)) {
+        const label = task.title;
+        if (!matches(`${label} ${task.description}`)) continue;
+        items.push({
+          key: task.id,
+          label,
+          description: `${task.status} · ${task.description || "No description"}`,
+          action: () => appendMention(label, mentionUri("task", task.id))
+        });
+      }
+    }
+    if (mentionCategory === "apps") {
+      for (const artifact of artifacts.slice(0, 8)) {
+        const label = artifact.name;
+        if (!matches(`${label} ${artifact.mimeType}`)) continue;
+        items.push({
+          key: artifact.id,
+          label,
+          description: `Artifact · ${artifact.mimeType}`,
+          action: () => appendMention(label, mentionUri("artifact", artifact.id))
+        });
+      }
+      for (const reference of workspaceReferences.slice(0, 8)) {
+        const label = reference.label;
+        if (!matches(`${label} ${reference.summary ?? ""}`)) continue;
+        items.push({
+          key: reference.id,
+          label,
+          description: `${reference.kind} reference · ${reference.summary || reference.targetId}`,
+          action: () => appendMention(label, workspaceReferenceUri(reference))
+        });
+      }
+    }
+    if (mentionCategory === "agents") {
+      for (const target of readyAgentTargets) {
+        if (!matches(`${target.app.label} ${target.app.description}`)) continue;
+        items.push({
+          key: target.app.id,
+          label: target.app.label,
+          description: target.app.description,
+          action: () => {
+            openAgentApp(target.app.id);
+            appendMention(target.app.label, mentionUri("agent", target.profile.id));
+          }
+        });
+      }
+    }
+    return items;
+  }
+
+  function buildGoalPlan(): Array<{ title: string; description: string }> {
+    const goal = goalText.trim();
+    if (!goal) {
+      return [];
+    }
+    return [
+      {
+        title: `Clarify scope: ${goal.slice(0, 44)}`,
+        description: `Define acceptance criteria, required files, constraints, and expected output for: ${goal}`
+      },
+      {
+        title: `Collect context for: ${goal.slice(0, 44)}`,
+        description: `Inspect workspace files, memories, recent runs, artifacts, and reusable references related to: ${goal}`
+      },
+      {
+        title: `Implement core deliverable: ${goal.slice(0, 44)}`,
+        description: `Build the smallest complete result that satisfies the goal, preserving existing workspace behavior.`
+      },
+      {
+        title: `Verify and package: ${goal.slice(0, 44)}`,
+        description: `Run relevant checks, summarize changes, create reusable artifacts, and mark follow-up risks.`
+      }
+    ];
+  }
+
+  async function createPlannedTasks() {
+    const plan = plannedTasks.length > 0 ? plannedTasks : buildGoalPlan();
+    if (!selectedWorkspaceId || plan.length === 0) {
+      return;
+    }
+    try {
+      for (const item of plan) {
+        await api<TaskRecord>(`/api/workspaces/${selectedWorkspaceId}/tasks`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: item.title,
+            description: item.description,
+            priority: "normal",
+            assignedAgentId: activeRunnableProfile?.id
+          })
+        });
+      }
+      setPlannedTasks([]);
+      setGoalText("");
+      await loadWorkbench(selectedWorkspaceId);
+      setActiveWindow("tasks");
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  async function sendTaskToAgent(task: TaskRecord, target: { app: (typeof agentApps)[number]; profile: AgentRecord }) {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+    try {
+      await updateTaskStatus(task.id, "in_progress");
+      await api<RunRecord>("/api/runs", {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId: selectedWorkspaceId,
+          agentId: target.profile.id,
+          title: `${task.title} · ${target.app.label}`,
+          prompt: [
+            `You are ${target.app.label}. Complete this workspace task.`,
+            "",
+            `Task: ${task.title}`,
+            "",
+            task.description || "No description provided.",
+            "",
+            "Use workspace files, memories, artifacts, and previous runs when relevant. Return concrete output and verification steps."
+          ].join("\n"),
+          retrievalQuery: task.description || task.title,
+          timeoutMs,
+          maxRetries
+        })
+      });
+      await Promise.all([refreshRuns(), loadWorkbench(selectedWorkspaceId)]);
+      setActiveAgentAppId(target.app.id);
+      setAgentWindowOpen(true);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
   }
 
   async function createAgentProfile(appId: AgentAppId) {
@@ -982,22 +1193,28 @@ function App() {
                 {commandPaletteOpen ? (
                   <div className="command-palette">
                     <nav>
-                      <button>Sessions</button>
-                      <button>Files</button>
-                      <button>Tasks</button>
-                      <button className="active">Apps</button>
+                      {mentionCategories.map((category) => (
+                        <button
+                          key={category.id}
+                          className={mentionCategory === category.id ? "active" : ""}
+                          onClick={() => setMentionCategory(category.id)}
+                        >
+                          {category.label}
+                        </button>
+                      ))}
                     </nav>
-                    {agentApps.map((app) => (
-                      <button key={app.id} onClick={() => {
-                        openAgentApp(app.id);
-                        appendPromptToken(`@${app.label}`);
-                      }}>
-                        {app.label} · {app.description}
+                    <input
+                      value={mentionQuery}
+                      onChange={(event) => setMentionQuery(event.target.value)}
+                      placeholder="Search sessions, files, tasks, apps, or agents"
+                    />
+                    {mentionItems().length === 0 ? <p className="empty-state">No matching workspace references.</p> : null}
+                    {mentionItems().map((item) => (
+                      <button key={item.key} onClick={item.action}>
+                        <strong>{item.label}</strong>
+                        <small>{item.description}</small>
                       </button>
                     ))}
-                    <button onClick={() => appendPromptToken("@MCP.echo_context")}>MCP echo_context · Use tool output</button>
-                    <button onClick={() => appendPromptToken("@Memory")}>Memory · Pull workspace memory</button>
-                    <button onClick={() => appendPromptToken("@RunHistory")}>Run history · Use previous output</button>
                   </div>
                 ) : null}
 
@@ -1031,7 +1248,7 @@ function App() {
                     +
                   </button>
                   <button className="ghost-action" onClick={() => setCommandPaletteOpen((open) => !open)}>
-                    @ Apps / Agents
+                    @ Workspace
                   </button>
                   <select value={selectedSkillId} onChange={(event) => setSelectedSkillId(event.target.value)}>
                     <option value="">Auto-review</option>
@@ -1268,6 +1485,43 @@ function App() {
                   onChange={(event) => setRetrievalQuery(event.target.value)}
                   placeholder="Search files, memories, and runs"
                 />
+                <div className="reference-section-title">Recent Agent outputs</div>
+                {sortedRuns.slice(0, 5).map((run) => (
+                  <button
+                    key={run.id}
+                    className="reference-result"
+                    onClick={() => appendMention(`${agentLabelForRun(run)} · ${run.title}`, mentionUri("run", run.id))}
+                  >
+                    <span>{run.status}</span>
+                    <strong>{agentLabelForRun(run)} · {run.title}</strong>
+                    <small>{compactRunMessage(run)}</small>
+                  </button>
+                ))}
+                <div className="reference-section-title">Tasks</div>
+                {openTasks.slice(0, 5).map((task) => (
+                  <button
+                    key={task.id}
+                    className="reference-result"
+                    onClick={() => appendMention(task.title, mentionUri("task", task.id))}
+                  >
+                    <span>{task.status}</span>
+                    <strong>{task.title}</strong>
+                    <small>{task.description || "No description"}</small>
+                  </button>
+                ))}
+                <div className="reference-section-title">Memories</div>
+                {recentMemories.slice(0, 4).map((memory) => (
+                  <button
+                    key={memory.id}
+                    className="reference-result"
+                    onClick={() => appendMention(`${memory.type} memory`, mentionUri("memory", memory.id))}
+                  >
+                    <span>{memory.type}</span>
+                    <strong>{memory.content.slice(0, 64)}</strong>
+                    <small>{memory.createdAt}</small>
+                  </button>
+                ))}
+                <div className="reference-section-title">Local files</div>
                 {files.slice(0, 10).map((file) => (
                   <button
                     key={file.path}
@@ -1285,6 +1539,7 @@ function App() {
                     <small>{file.path}</small>
                   </button>
                 ))}
+                <div className="reference-section-title">Artifacts</div>
                 {artifacts.slice(0, 5).map((artifact) => (
                   <button
                     key={artifact.id}
@@ -1305,11 +1560,12 @@ function App() {
                     <small>{artifact.mimeType}</small>
                   </button>
                 ))}
+                <div className="reference-section-title">Workspace references</div>
                 {workspaceReferences.slice(0, 5).map((reference) => (
                   <button
                     key={reference.id}
                     className="reference-result"
-                    onClick={() => appendPromptToken(`@${reference.kind}:${reference.label}`)}
+                    onClick={() => appendMention(reference.label, workspaceReferenceUri(reference))}
                   >
                     <span>{reference.kind}</span>
                     <strong>{reference.label}</strong>
@@ -1390,6 +1646,7 @@ function App() {
             ))}
             {[
               ["Task Center", "Break goals into sub-tasks and send them to agents.", "Open"],
+              ["Goal Planner", "Describe an outcome, review generated sub-tasks, and assign them to Agents.", "Open"],
               ["Reference Picker", "Attach files, memories, tool calls, and run outputs.", "Open"],
               ["Artifacts", "Review generated outputs and reuse them as context.", "Open"],
               ["Approvals", "Review failed runs and pending human decisions.", "Open"],
@@ -1403,6 +1660,7 @@ function App() {
                 key={name}
                 onClick={() => {
                   if (name === "Reference Picker") setReferencePickerOpen(true);
+                  if (name === "Goal Planner") setActiveWindow("tasks");
                   if (name === "Artifacts") setActiveWindow("artifacts");
                   if (name === "Approvals") setActiveWindow("approvals");
                   if (name === "Memory Hub") setActiveWindow("memory");
@@ -1536,6 +1794,38 @@ function App() {
         {activeWindow === "tasks" ? (
           <div className="window-content split-content">
             <div className="memory-editor">
+              <div className="goal-planner">
+                <span className="section-kicker">Goal to tasks</span>
+                <label>
+                  Goal
+                  <textarea
+                    value={goalText}
+                    onChange={(event) => setGoalText(event.target.value)}
+                    placeholder="Describe the outcome. WinAgent will break it into reviewable tasks."
+                  />
+                </label>
+                <div className="file-actions">
+                  <button
+                    disabled={!goalText.trim()}
+                    onClick={() => setPlannedTasks(buildGoalPlan())}
+                  >
+                    Break down
+                  </button>
+                  <button disabled={plannedTasks.length === 0 && !goalText.trim()} onClick={() => void createPlannedTasks()}>
+                    Create tasks
+                  </button>
+                </div>
+                {plannedTasks.length > 0 ? (
+                  <div className="planned-task-list">
+                    {plannedTasks.map((item, index) => (
+                      <div className="planned-task" key={`${item.title}-${index}`}>
+                        <strong>{index + 1}. {item.title}</strong>
+                        <small>{item.description}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <label>
                 Task title
                 <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
@@ -1567,6 +1857,11 @@ function App() {
                     <button onClick={() => void updateTaskStatus(task.id, "in_progress")}>Start</button>
                     <button onClick={() => void updateTaskStatus(task.id, "review")}>Review</button>
                     <button onClick={() => void updateTaskStatus(task.id, "completed")}>Done</button>
+                    {readyAgentTargets.slice(0, 3).map((target) => (
+                      <button key={target.app.id} onClick={() => void sendTaskToAgent(task, target)}>
+                        Send to {target.app.label}
+                      </button>
+                    ))}
                     <button
                       onClick={() => {
                         setPrompt(task.description || task.title);

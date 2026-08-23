@@ -7,6 +7,7 @@ export type RunEventType =
   | "run.status.changed"
   | "run.tool.called"
   | "run.file.referenced"
+  | "run.mentions.resolved"
   | "run.completed"
   | "run.failed"
   | "run.cancelled";

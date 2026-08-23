@@ -21,6 +21,7 @@ export class ContextProvider {
     retrievalHits?: RetrievalHit[];
     shortTermMemory?: RunWorkingMemoryRecord;
     longTermMemories?: WorkspaceMemoryRecord[];
+    mentionContext?: string;
     toolResults?: Array<{
       serverName: string;
       toolName: string;
@@ -68,6 +69,10 @@ export class ContextProvider {
           )
           .join("\n\n")
       );
+    }
+    if (input.mentionContext?.trim()) {
+      sections.push("\n# Workspace Mentions");
+      sections.push(input.mentionContext.trim());
     }
     if (input.toolResults && input.toolResults.length > 0) {
       sections.push("\n# MCP Tool Results");

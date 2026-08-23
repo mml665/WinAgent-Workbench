@@ -68,6 +68,7 @@ const services = {
     artifactRepo,
     approvalRepo,
     referenceRepo,
+    taskRepo,
     new ContextProvider(),
     workspaceIndex,
     new AgentProcessManager(),

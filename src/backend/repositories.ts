@@ -554,6 +554,11 @@ export class RunRepository {
 }
 
 export class RunArtifactRepository {
+  get(id: string): RunArtifactRecord | null {
+    const row = db.prepare(`SELECT * FROM run_artifacts WHERE id = ?`).get(id) as any;
+    return row ? mapRunArtifact(row) : null;
+  }
+
   list(runId: string): RunArtifactRecord[] {
     return db
       .prepare(`SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC`)
@@ -718,6 +723,11 @@ export class ApprovalRepository {
 }
 
 export class WorkspaceReferenceRepository {
+  get(id: string): WorkspaceReferenceRecord | null {
+    const row = db.prepare(`SELECT * FROM workspace_references WHERE id = ?`).get(id) as any;
+    return row ? mapWorkspaceReference(row) : null;
+  }
+
   list(workspaceId?: string): WorkspaceReferenceRecord[] {
     const rows = workspaceId
       ? db
@@ -756,6 +766,11 @@ export class WorkspaceReferenceRepository {
 }
 
 export class MemoryRepository {
+  getWorkspaceMemory(id: string): WorkspaceMemoryRecord | null {
+    const row = db.prepare(`SELECT * FROM workspace_memories WHERE id = ?`).get(id) as any;
+    return row ? mapWorkspaceMemory(row) : null;
+  }
+
   createWorkspaceMemory(input: {
     workspaceId: string;
     type: MemoryType;

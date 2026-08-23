@@ -42,6 +42,10 @@ export class MemoryService {
     return this.memories.getRunWorkingMemory(runId);
   }
 
+  getWorkspaceMemory(memoryId: string): WorkspaceMemoryRecord | null {
+    return this.memories.getWorkspaceMemory(memoryId);
+  }
+
   buildWorkingMemory(input: {
     run: RunRecord;
     retrievalHits: RetrievalHit[];
