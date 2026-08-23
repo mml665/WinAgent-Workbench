@@ -5,6 +5,13 @@ const dbPath = path.resolve(process.cwd(), "data", "winagent.sqlite");
 const db = new DatabaseSync(dbPath);
 
 db.exec("PRAGMA foreign_keys = ON");
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )
+`);
 
 const smokeRunIds = db
   .prepare(
@@ -56,6 +63,7 @@ try {
         OR args_json LIKE '%WINAGENT_DONE%'
         OR args_json LIKE '%retry smoke failure%'`
   ).run();
+  db.prepare(`DELETE FROM settings WHERE key LIKE 'acceptance.%'`).run();
   for (const workspaceId of smokeWorkspaceIds) {
     db.prepare(`DELETE FROM workspaces WHERE id = ?`).run(workspaceId);
   }

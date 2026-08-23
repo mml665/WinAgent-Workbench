@@ -1,13 +1,16 @@
 import type {
+  AgentAdapterRecord,
   AgentRecord,
   McpServerRecord,
   McpToolCallRecord,
   McpToolRecord,
   MemoryType,
   RetrievalHit,
+  RunArtifactRecord,
   RunWorkingMemoryRecord,
   RunEventRecord,
   RunRecord,
+  SettingRecord,
   WorkspaceIndexRecord,
   WorkspaceMemoryRecord,
   WorkspaceRecord
@@ -18,6 +21,51 @@ import { nowIso } from "./utils/time";
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
+}
+
+function mapAgent(row: any): AgentRecord {
+  return {
+    id: row.id,
+    adapterId: row.adapter_id ?? undefined,
+    name: row.name,
+    command: row.command,
+    args: parseJson<string[]>(row.args_json),
+    env: parseJson<Record<string, string>>(row.env_json),
+    cwd: row.cwd ?? undefined,
+    enabled: row.enabled !== 0,
+    capabilities: parseJson<Record<string, unknown>>(row.capabilities_json ?? "{}"),
+    lastReadinessStatus: row.last_readiness_status ?? undefined,
+    lastReadinessCheckedAt: row.last_readiness_checked_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export class SettingRepository {
+  list(): SettingRecord[] {
+    return db
+      .prepare(`SELECT key, value_json, updated_at FROM settings ORDER BY key ASC`)
+      .all()
+      .map((row: any) => ({
+        key: row.key,
+        value: parseJson<unknown>(row.value_json),
+        updatedAt: row.updated_at
+      }));
+  }
+
+  get(key: string): SettingRecord | null {
+    return this.list().find((setting) => setting.key === key) ?? null;
+  }
+
+  set(key: string, value: unknown): SettingRecord {
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO settings (key, value_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`
+    ).run(key, JSON.stringify(value ?? null), at);
+    return this.get(key)!;
+  }
 }
 
 export class WorkspaceRepository {
@@ -77,24 +125,75 @@ export class WorkspaceRepository {
   }
 }
 
-export class AgentRepository {
-  list(): AgentRecord[] {
+export class AgentAdapterRepository {
+  list(): AgentAdapterRecord[] {
     return db
       .prepare(
-        `SELECT id, name, command, args_json, env_json, cwd, created_at, updated_at
-         FROM agents ORDER BY created_at ASC`
+        `SELECT id, label, command, default_args_json, capabilities_json, install_state, created_at, updated_at
+         FROM agent_adapters ORDER BY label ASC`
       )
       .all()
       .map((row: any) => ({
         id: row.id,
-        name: row.name,
+        label: row.label,
         command: row.command,
-        args: parseJson<string[]>(row.args_json),
-        env: parseJson<Record<string, string>>(row.env_json),
-        cwd: row.cwd ?? undefined,
+        defaultArgs: parseJson<string[]>(row.default_args_json),
+        capabilities: parseJson<Record<string, unknown>>(row.capabilities_json),
+        installState: row.install_state,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       }));
+  }
+
+  get(id: string): AgentAdapterRecord | null {
+    return this.list().find((adapter) => adapter.id === id) ?? null;
+  }
+
+  upsert(input: {
+    id: string;
+    label: string;
+    command: string;
+    defaultArgs?: string[];
+    capabilities?: Record<string, unknown>;
+    installState?: AgentAdapterRecord["installState"];
+  }): AgentAdapterRecord {
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO agent_adapters (
+        id, label, command, default_args_json, capabilities_json, install_state, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        label = excluded.label,
+        command = excluded.command,
+        default_args_json = excluded.default_args_json,
+        capabilities_json = excluded.capabilities_json,
+        install_state = excluded.install_state,
+        updated_at = excluded.updated_at`
+    ).run(
+      input.id,
+      input.label,
+      input.command,
+      JSON.stringify(input.defaultArgs ?? []),
+      JSON.stringify(input.capabilities ?? {}),
+      input.installState ?? "external",
+      at,
+      at
+    );
+    return this.get(input.id)!;
+  }
+}
+
+export class AgentRepository {
+  list(): AgentRecord[] {
+    return db
+      .prepare(
+        `SELECT id, adapter_id, name, command, args_json, env_json, cwd, enabled,
+                capabilities_json, last_readiness_status, last_readiness_checked_at,
+                created_at, updated_at
+         FROM agents ORDER BY created_at ASC`
+      )
+      .all()
+      .map(mapAgent);
   }
 
   get(id: string): AgentRecord | null {
@@ -102,26 +201,70 @@ export class AgentRepository {
   }
 
   create(input: {
+    adapterId?: string;
     name: string;
     command: string;
     args?: string[];
     env?: Record<string, string>;
     cwd?: string;
+    enabled?: boolean;
+    capabilities?: Record<string, unknown>;
   }): AgentRecord {
     const id = newId("agent");
     const at = nowIso();
     db.prepare(
-      `INSERT INTO agents (id, name, command, args_json, env_json, cwd, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO agents (
+        id, adapter_id, name, command, args_json, env_json, cwd, enabled, capabilities_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
+      input.adapterId ?? null,
       input.name,
       input.command,
       JSON.stringify(input.args ?? []),
       JSON.stringify(input.env ?? {}),
       input.cwd ?? null,
+      input.enabled === false ? 0 : 1,
+      JSON.stringify(input.capabilities ?? {}),
       at,
       at
+    );
+    return this.get(id)!;
+  }
+
+  updateReadiness(id: string, status: string, checkedAt = nowIso()): AgentRecord {
+    db.prepare(
+      `UPDATE agents SET last_readiness_status = ?, last_readiness_checked_at = ?, updated_at = ? WHERE id = ?`
+    ).run(status, checkedAt, checkedAt, id);
+    return this.get(id)!;
+  }
+
+  updateRuntimeMetadata(
+    id: string,
+    input: {
+      adapterId?: string;
+      capabilities?: Record<string, unknown>;
+      readinessStatus?: string;
+      checkedAt?: string;
+    }
+  ): AgentRecord {
+    const at = input.checkedAt ?? nowIso();
+    db.prepare(
+      `UPDATE agents
+       SET adapter_id = COALESCE(?, adapter_id),
+           capabilities_json = COALESCE(?, capabilities_json),
+           last_readiness_status = COALESCE(?, last_readiness_status),
+           last_readiness_checked_at = COALESCE(?, last_readiness_checked_at),
+           updated_at = ?
+       WHERE id = ?`
+    ).run(
+      input.adapterId ?? null,
+      input.capabilities ? JSON.stringify(input.capabilities) : null,
+      input.readinessStatus ?? null,
+      input.checkedAt ?? at,
+      at,
+      id
     );
     return this.get(id)!;
   }
@@ -405,6 +548,44 @@ export class RunRepository {
   }
 }
 
+export class RunArtifactRepository {
+  list(runId: string): RunArtifactRecord[] {
+    return db
+      .prepare(`SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC`)
+      .all(runId)
+      .map(mapRunArtifact);
+  }
+
+  create(input: {
+    runId: string;
+    kind: RunArtifactRecord["kind"];
+    name: string;
+    mimeType: string;
+    contentText?: string;
+    filePath?: string;
+    metadata?: Record<string, unknown>;
+  }): RunArtifactRecord {
+    const id = newId("artifact");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO run_artifacts (
+        id, run_id, kind, name, mime_type, content_text, file_path, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      input.runId,
+      input.kind,
+      input.name,
+      input.mimeType,
+      input.contentText ?? null,
+      input.filePath ?? null,
+      JSON.stringify(input.metadata ?? {}),
+      at
+    );
+    return this.list(input.runId).find((artifact) => artifact.id === id)!;
+  }
+}
+
 export class MemoryRepository {
   createWorkspaceMemory(input: {
     workspaceId: string;
@@ -508,6 +689,20 @@ function mapRun(row: any): RunRecord {
     summary: row.summary ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function mapRunArtifact(row: any): RunArtifactRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    kind: row.kind,
+    name: row.name,
+    mimeType: row.mime_type,
+    contentText: row.content_text ?? undefined,
+    filePath: row.file_path ?? undefined,
+    metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+    createdAt: row.created_at
   };
 }
 

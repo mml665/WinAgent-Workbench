@@ -16,11 +16,16 @@ export interface WorkspaceRecord {
 
 export interface AgentRecord {
   id: string;
+  adapterId?: string;
   name: string;
   command: string;
   args: string[];
   env: Record<string, string>;
   cwd?: string;
+  enabled: boolean;
+  capabilities: Record<string, unknown>;
+  lastReadinessStatus?: AgentRuntimeStatus;
+  lastReadinessCheckedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +42,23 @@ export interface AgentReadinessRecord {
   recommendedArgs: string[];
   profileId?: string;
   message: string;
+}
+
+export interface AgentAdapterRecord {
+  id: string;
+  label: string;
+  command: string;
+  defaultArgs: string[];
+  capabilities: Record<string, unknown>;
+  installState: "managed" | "external" | "missing";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SettingRecord {
+  key: string;
+  value: unknown;
+  updatedAt: string;
 }
 
 export interface SkillRecord {
@@ -122,6 +144,18 @@ export interface RunEventRecord {
   sequence: number;
   type: string;
   payload: unknown;
+  createdAt: string;
+}
+
+export interface RunArtifactRecord {
+  id: string;
+  runId: string;
+  kind: "markdown" | "text" | "json" | "file";
+  name: string;
+  mimeType: string;
+  contentText?: string;
+  filePath?: string;
+  metadata: Record<string, unknown>;
   createdAt: string;
 }
 

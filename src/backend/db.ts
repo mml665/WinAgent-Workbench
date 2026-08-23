@@ -12,6 +12,18 @@ db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
 
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -21,13 +33,29 @@ db.exec(`
     last_opened_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS agent_adapters (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    command TEXT NOT NULL,
+    default_args_json TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    install_state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
+    adapter_id TEXT REFERENCES agent_adapters(id),
     name TEXT NOT NULL,
     command TEXT NOT NULL,
     args_json TEXT NOT NULL,
     env_json TEXT NOT NULL,
     cwd TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    last_readiness_status TEXT,
+    last_readiness_checked_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -137,9 +165,22 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS run_artifacts (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    content_text TEXT,
+    file_path TEXT,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS idx_runs_workspace ON runs(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, sequence);
+  CREATE INDEX IF NOT EXISTS idx_run_artifacts_run ON run_artifacts(run_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_workspace_index_workspace ON workspace_index(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_server ON mcp_tool_calls(server_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_workspace_memories_workspace ON workspace_memories(workspace_id, created_at);
@@ -147,6 +188,11 @@ db.exec(`
 `);
 
 for (const migration of [
+  "ALTER TABLE agents ADD COLUMN adapter_id TEXT REFERENCES agent_adapters(id)",
+  "ALTER TABLE agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE agents ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'",
+  "ALTER TABLE agents ADD COLUMN last_readiness_status TEXT",
+  "ALTER TABLE agents ADD COLUMN last_readiness_checked_at TEXT",
   "ALTER TABLE mcp_servers ADD COLUMN last_error TEXT",
   "ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE runs ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0",
@@ -163,4 +209,21 @@ for (const migration of [
   }
 }
 
-db.exec("CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_run ON mcp_tool_calls(run_id, created_at)");
+const bootstrapMigrations = [
+  ["0001_initial_runtime_schema", "Initial local runtime schema"],
+  ["0002_agent_adapters_settings_artifacts", "Agent adapters, settings, run artifacts, and Agent readiness columns"]
+] as const;
+
+const appliedAt = new Date().toISOString();
+const insertMigration = db.prepare(
+  `INSERT OR IGNORE INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)`
+);
+for (const [id, name] of bootstrapMigrations) {
+  insertMigration.run(id, name, appliedAt);
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_agents_adapter ON agents(adapter_id);
+  CREATE INDEX IF NOT EXISTS idx_run_artifacts_run ON run_artifacts(run_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_run ON mcp_tool_calls(run_id, created_at);
+`);

@@ -1,47 +1,69 @@
 import { spawnSync } from "node:child_process";
-import type { AgentReadinessRecord, AgentRecord } from "../../shared/types";
-import { AgentRepository } from "../repositories";
+import type { AgentAdapterRecord, AgentReadinessRecord, AgentRecord } from "../../shared/types";
+import { AgentAdapterRepository, AgentRepository } from "../repositories";
 
-interface AgentDefinition {
-  id: AgentReadinessRecord["id"];
+const defaultAdapters: Array<{
+  id: string;
   label: string;
   command: string;
-  recommendedArgs: string[];
-  supportsStreaming: boolean;
-  launcherOnly?: boolean;
-}
-
-const definitions: AgentDefinition[] = [
+  defaultArgs: string[];
+  capabilities: Record<string, unknown>;
+  installState: AgentAdapterRecord["installState"];
+}> = [
   {
     id: "codex",
     label: "Codex",
     command: "codex",
-    recommendedArgs: ["exec", "--skip-git-repo-check", "-"],
-    supportsStreaming: true
+    defaultArgs: ["exec", "--skip-git-repo-check", "-"],
+    installState: "external",
+    capabilities: {
+      streaming: true,
+      stdin: true,
+      nonInteractive: true,
+      workspaceCwd: true,
+      kind: "agent-runtime"
+    }
   },
   {
     id: "qoder",
     label: "Qoder",
     command: "qoder",
-    recommendedArgs: [],
-    supportsStreaming: false,
-    launcherOnly: true
+    defaultArgs: [],
+    installState: "external",
+    capabilities: {
+      streaming: false,
+      stdin: false,
+      nonInteractive: false,
+      launcherOnly: true,
+      kind: "editor-launcher"
+    }
   },
   {
     id: "workbuddy",
     label: "WorkBuddy",
     command: "workbuddy",
-    recommendedArgs: [],
-    supportsStreaming: true
+    defaultArgs: [],
+    installState: "missing",
+    capabilities: {
+      streaming: true,
+      stdin: true,
+      nonInteractive: true,
+      workspaceCwd: true,
+      kind: "agent-runtime"
+    }
   }
 ];
 
 export class AgentReadinessService {
-  constructor(private readonly agents: AgentRepository) {}
+  constructor(
+    private readonly agents: AgentRepository,
+    private readonly adapters: AgentAdapterRepository
+  ) {}
 
   list(): AgentReadinessRecord[] {
+    this.ensureDefaultAdapters();
     const profiles = this.agents.list();
-    return definitions.map((definition) => this.inspect(definition, profiles));
+    return this.adapters.list().map((adapter) => this.inspect(adapter, profiles));
   }
 
   ensureUsableProfiles(): void {
@@ -49,21 +71,17 @@ export class AgentReadinessService {
       if (readiness.status !== "ready" || readiness.profileId) {
         continue;
       }
-      this.agents.create({
-        name: readiness.label,
-        command: readiness.command,
-        args: readiness.recommendedArgs,
-        env: {}
-      });
+      this.provision(readiness.id);
     }
   }
 
   provision(id: string, cwd?: string): AgentRecord {
-    const definition = definitions.find((candidate) => candidate.id === id);
-    if (!definition) {
+    this.ensureDefaultAdapters();
+    const adapter = this.adapters.get(id);
+    if (!adapter) {
       throw new Error(`Unsupported Agent app: ${id}`);
     }
-    const readiness = this.inspect(definition, this.agents.list());
+    const readiness = this.inspect(adapter, this.agents.list());
     if (readiness.status !== "ready") {
       throw new Error(readiness.message);
     }
@@ -74,75 +92,114 @@ export class AgentReadinessService {
       }
     }
     return this.agents.create({
-      name: definition.label,
-      command: definition.command,
-      args: definition.recommendedArgs,
+      adapterId: adapter.id,
+      name: adapter.label,
+      command: adapter.command,
+      args: adapter.defaultArgs,
       env: {},
-      cwd
+      cwd,
+      capabilities: adapter.capabilities
     });
   }
 
-  private inspect(definition: AgentDefinition, profiles: AgentRecord[]): AgentReadinessRecord {
-    const installedPath = findCommand(definition.command);
-    const profile = profiles.find((agent) => isProfileForDefinition(agent, definition));
+  ensureDefaultAdapters(): void {
+    for (const adapter of defaultAdapters) {
+      this.adapters.upsert(adapter);
+    }
+  }
+
+  private inspect(adapter: AgentAdapterRecord, profiles: AgentRecord[]): AgentReadinessRecord {
+    const installedPath = findCommand(adapter.command);
+    const profile = profiles.find((agent) => isProfileForAdapter(agent, adapter));
+    const supportsStreaming = adapter.capabilities.streaming === true;
+    const launcherOnly = adapter.capabilities.launcherOnly === true;
     if (!installedPath) {
+      if (profile) {
+        this.agents.updateRuntimeMetadata(profile.id, {
+          adapterId: adapter.id,
+          capabilities: adapter.capabilities,
+          readinessStatus: "missing"
+        });
+      }
       return {
-        id: definition.id,
-        label: definition.label,
-        command: definition.command,
+        id: adapter.id,
+        label: adapter.label,
+        command: adapter.command,
         status: "missing",
-        supportsStreaming: definition.supportsStreaming,
-        recommendedArgs: definition.recommendedArgs,
+        supportsStreaming,
+        recommendedArgs: adapter.defaultArgs,
         profileId: profile?.id,
-        message: `${definition.label} command was not found on PATH.`
+        message: `${adapter.label} command was not found on PATH.`
       };
     }
-    if (definition.launcherOnly) {
+    if (launcherOnly) {
+      if (profile) {
+        this.agents.updateRuntimeMetadata(profile.id, {
+          adapterId: adapter.id,
+          capabilities: adapter.capabilities,
+          readinessStatus: "launcher"
+        });
+      }
       return {
-        id: definition.id,
-        label: definition.label,
-        command: definition.command,
+        id: adapter.id,
+        label: adapter.label,
+        command: adapter.command,
         status: "launcher",
         installedPath,
         supportsStreaming: false,
-        recommendedArgs: definition.recommendedArgs,
+        recommendedArgs: adapter.defaultArgs,
         profileId: profile?.id,
-        message: `${definition.label} is installed, but this CLI opens the desktop editor instead of running a stdin/stdout Agent task.`
+        message: `${adapter.label} is installed, but this CLI opens the desktop editor instead of running a stdin/stdout Agent task.`
       };
     }
-    if (!definition.supportsStreaming) {
+    if (!supportsStreaming) {
+      if (profile) {
+        this.agents.updateRuntimeMetadata(profile.id, {
+          adapterId: adapter.id,
+          capabilities: adapter.capabilities,
+          readinessStatus: "unsupported"
+        });
+      }
       return {
-        id: definition.id,
-        label: definition.label,
-        command: definition.command,
+        id: adapter.id,
+        label: adapter.label,
+        command: adapter.command,
         status: "unsupported",
         installedPath,
         supportsStreaming: false,
-        recommendedArgs: definition.recommendedArgs,
+        recommendedArgs: adapter.defaultArgs,
         profileId: profile?.id,
-        message: `${definition.label} is installed, but no non-interactive streaming adapter is configured.`
+        message: `${adapter.label} is installed, but no non-interactive streaming adapter is configured.`
       };
     }
+    if (profile) {
+      this.agents.updateRuntimeMetadata(profile.id, {
+        adapterId: adapter.id,
+        capabilities: adapter.capabilities,
+        readinessStatus: "ready"
+      });
+    }
     return {
-      id: definition.id,
-      label: definition.label,
-      command: definition.command,
+      id: adapter.id,
+      label: adapter.label,
+      command: adapter.command,
       status: "ready",
       installedPath,
       supportsStreaming: true,
-      recommendedArgs: definition.recommendedArgs,
+      recommendedArgs: adapter.defaultArgs,
       profileId: profile?.id,
       message: profile
-        ? `${definition.label} is ready and has a runnable profile.`
-        : `${definition.label} is installed and can be provisioned as a runnable profile.`
+        ? `${adapter.label} is ready and has a runnable profile.`
+        : `${adapter.label} is installed and can be provisioned as a runnable profile.`
     };
   }
 }
 
-function isProfileForDefinition(agent: AgentRecord, definition: AgentDefinition): boolean {
+function isProfileForAdapter(agent: AgentRecord, adapter: AgentAdapterRecord): boolean {
   return (
-    agent.name.toLowerCase() === definition.label.toLowerCase() ||
-    agent.command.toLowerCase() === definition.command.toLowerCase()
+    agent.adapterId === adapter.id ||
+    agent.name.toLowerCase() === adapter.label.toLowerCase() ||
+    agent.command.toLowerCase() === adapter.command.toLowerCase()
   );
 }
 

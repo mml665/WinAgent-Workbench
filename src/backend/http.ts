@@ -6,12 +6,14 @@ import type { McpServerService } from "./services/mcpServerService";
 import type { MemoryService } from "./services/memoryService";
 import type { RunService } from "./services/runService";
 import type { SkillRegistry } from "./services/skillRegistry";
+import type { SystemService } from "./services/systemService";
 import type { WorkspaceService } from "./services/workspaceService";
 import type { WorkspaceIndexService } from "./services/workspaceIndexService";
 
 export interface HttpServices {
   workspaces: WorkspaceService;
   agents: AgentConfigService;
+  system: SystemService;
   skills: SkillRegistry;
   mcpServers: McpServerService;
   workspaceIndex: WorkspaceIndexService;
@@ -62,6 +64,11 @@ export async function handleApi(
       sendJson(res, 200, services.agents.readinessList());
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/agent-adapters") {
+      services.agents.readinessList();
+      sendJson(res, 200, services.system.agentAdapters());
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/agents") {
       sendJson(res, 200, services.agents.create(await readJson(req)));
       return;
@@ -72,6 +79,18 @@ export async function handleApi(
     }
     if (req.method === "GET" && url.pathname === "/api/skills") {
       sendJson(res, 200, services.skills.list());
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/settings") {
+      sendJson(res, 200, services.system.settingsList());
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/settings") {
+      sendJson(res, 200, services.system.setSetting(await readJson(req)));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/schema-migrations") {
+      sendJson(res, 200, services.system.migrations());
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/mcp-servers") {

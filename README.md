@@ -12,7 +12,7 @@ The project focuses on a small but engineered loop:
 - Context Provider with explicit file references and lightweight project retrieval
 - Short-term working memory per Run and long-term workspace memory
 - Run queue with same-Agent concurrency control, queued cancel, timeout, and retry
-- SQLite persistence through Node 24 `node:sqlite`
+- SQLite persistence through Node 24 `node:sqlite`, schema migrations, adapter registry, settings, and run artifacts
 - Windows smoke validation
 - Automated acceptance validation with a real Codex Agent run
 
@@ -57,6 +57,8 @@ Implemented:
 - Inject skill instructions, explicit files, MCP server names, and retrieval hits into an Agent prompt.
 - Persist long-term workspace memories, select relevant memories for new Runs, and build a bounded short-term working-memory snapshot before process start.
 - Automatically write completed/failed Run outcomes back into long-term memory.
+- Persist Agent adapter capabilities separately from runnable Agent profiles.
+- Expose schema migrations, settings, and Agent adapter registry through backend system APIs.
 - Cancel queued or running runs.
 - Retry failed runs up to `maxRetries`.
 - Kill timed-out runs and mark them failed.

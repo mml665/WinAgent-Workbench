@@ -1,12 +1,15 @@
 import type { AgentReadinessRecord, AgentRecord } from "../../shared/types";
-import { AgentRepository } from "../repositories";
+import { AgentAdapterRepository, AgentRepository } from "../repositories";
 import { AgentReadinessService } from "./agentReadinessService";
 
 export class AgentConfigService {
   private readonly readiness: AgentReadinessService;
 
-  constructor(private readonly agents: AgentRepository) {
-    this.readiness = new AgentReadinessService(agents);
+  constructor(
+    private readonly agents: AgentRepository,
+    adapters: AgentAdapterRepository
+  ) {
+    this.readiness = new AgentReadinessService(agents, adapters);
   }
 
   list(): AgentRecord[] {
