@@ -7,6 +7,7 @@
   - `E:\tutti\tutti\tutti\docs\assets\zh\control-center.jpg`
 - Implementation screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-tutti-redesign-clean.png`
 - Windows-style follow-up screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-windows-workbench.png`
+- Hidden-window behavior screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-window-hidden.png`
 - Viewport: Codex in-app browser desktop viewport, captured full page.
 - Source pixel dimensions: README screenshots are 1600 x 1000.
 - Implementation pixel dimensions: browser-rendered screenshot captured from local Vite app.
@@ -63,6 +64,11 @@ Focused visual regions were checked against the source screenshots:
    - Severity: P2 for platform fit.
    - Fix: replaced macOS traffic lights with Windows minimize/maximize/close controls, changed the dock into a Windows taskbar, moved the background from pastoral desktop art toward Windows 11 Mica/Acrylic blue gradients, and reduced window radii.
    - Post-fix evidence: `E:\WinAgent-Workbench\.tmp\winagent-windows-workbench.png`.
+
+5. User identified that the Applications window stayed in front and could not be hidden.
+   - Severity: P1 for core workspace usability.
+   - Fix: changed the floating window state from always-open to nullable, wired minimize and close controls to hide the window, and verified taskbar buttons reopen it.
+   - Post-fix evidence: close behavior produced `before: 1`, `after: 0`, and reopening from the taskbar produced `reopened: 1`.
 
 ## Required fidelity surfaces
 

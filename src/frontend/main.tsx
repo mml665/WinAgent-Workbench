@@ -68,7 +68,7 @@ function App() {
   const [memoryContent, setMemoryContent] = useState(
     "This workspace prefers Windows-compatible Agent tooling with observable runs."
   );
-  const [activeWindow, setActiveWindow] = useState<DesktopWindow>("apps");
+  const [activeWindow, setActiveWindow] = useState<DesktopWindow | null>("apps");
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [error, setError] = useState("");
@@ -645,7 +645,8 @@ function App() {
         </div>
       ) : null}
 
-      <section className={`workspace-window floating-window ${activeWindow ? "open" : ""}`}>
+      {activeWindow ? (
+      <section className="workspace-window floating-window">
         <div className="window-titlebar">
           <div className="window-app-id">
             <span className="window-app-icon">
@@ -665,10 +666,14 @@ function App() {
           </div>
           <span className="window-spacer" />
           <button className="title-action" onClick={() => setActiveWindow("apps")}>Home</button>
-          <div className="windows-controls" aria-hidden="true">
-            <span>—</span>
-            <span>□</span>
-            <span>×</span>
+          <div className="windows-controls">
+            <button className="win-control" onClick={() => setActiveWindow(null)} aria-label="Minimize window">
+              —
+            </button>
+            <span aria-hidden="true">□</span>
+            <button className="win-control close" onClick={() => setActiveWindow(null)} aria-label="Close window">
+              ×
+            </button>
           </div>
         </div>
 
@@ -839,6 +844,7 @@ function App() {
           </div>
         ) : null}
       </section>
+      ) : null}
 
       <nav className="workspace-dock" aria-label="Workspace applications">
         <button className="start-button" onClick={() => setActiveWindow("apps")}>⊞</button>
