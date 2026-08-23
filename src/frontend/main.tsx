@@ -30,6 +30,10 @@ type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs" | "tasks" | "a
 type AgentAppId = "codex" | "claude" | "workbuddy" | "qoder";
 type RuntimeStatus = "checking" | "online" | "degraded" | "offline";
 type MentionCategory = "sessions" | "files" | "tasks" | "apps" | "agents";
+type ComposerMention = {
+  label: string;
+  uri: string;
+};
 
 const agentApps: Array<{ id: AgentAppId; label: string; icon: string; description: string }> = [
   {
@@ -215,6 +219,7 @@ function App() {
   const [fileRefs, setFileRefs] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [composerMentions, setComposerMentions] = useState<ComposerMention[]>([]);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
   const [goalText, setGoalText] = useState("");
@@ -275,6 +280,7 @@ function App() {
   const readyAgentTargets = agentApps
     .map((app) => ({ app, profile: profileForAgentApp(app.id) }))
     .filter((target): target is { app: (typeof agentApps)[number]; profile: AgentRecord } => Boolean(target.profile));
+  const canSendRun = Boolean(selectedWorkspaceId && activeRunnableProfile && prompt.trim());
 
   useEffect(() => {
     void refreshAll();
@@ -517,8 +523,13 @@ function App() {
       setError(`${activeAgentApp.label} does not have a runnable local Agent profile yet.`);
       return;
     }
+    const userPrompt = prompt.trim();
+    if (!userPrompt) {
+      return;
+    }
     try {
-      const nextTitle = title.trim() || prompt.trim().slice(0, 48) || "Untitled run";
+      const nextPrompt = buildComposerPrompt(userPrompt);
+      const nextTitle = title.trim() || userPrompt.slice(0, 48) || "Untitled run";
       await api<RunRecord>("/api/runs", {
         method: "POST",
         body: JSON.stringify({
@@ -526,7 +537,7 @@ function App() {
           agentId: activeRunnableProfile.id,
           skillId: selectedSkillId || undefined,
           title: nextTitle,
-          prompt,
+          prompt: nextPrompt,
           fileRefs,
           retrievalQuery,
           timeoutMs,
@@ -536,6 +547,8 @@ function App() {
       });
       await refreshRuns();
       setTitle("");
+      setPrompt("");
+      setComposerMentions([]);
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -717,7 +730,40 @@ function App() {
   }
 
   function appendMention(label: string, uri: string) {
-    appendPromptToken(`@[${label}](${uri})`);
+    const token = `@${label}`;
+    setPrompt((current) => `${current.trimEnd()} ${token} `.trimStart());
+    setComposerMentions((current) =>
+      current.some((mention) => mention.uri === uri) ? current : [...current, { label, uri }]
+    );
+    setCommandPaletteOpen(false);
+    setReferencePickerOpen(false);
+    setMentionQuery("");
+  }
+
+  function removeComposerMention(uri: string) {
+    setComposerMentions((current) => current.filter((mention) => mention.uri !== uri));
+  }
+
+  function buildComposerPrompt(userPrompt: string): string {
+    if (composerMentions.length === 0) {
+      return userPrompt;
+    }
+    return [
+      userPrompt,
+      "",
+      "# Workspace mention references",
+      ...composerMentions.map((mention) => `- @${mention.label}: ${mention.uri}`)
+    ].join("\n");
+  }
+
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+    event.preventDefault();
+    if (canSendRun) {
+      void createRun();
+    }
   }
 
   function mentionUri(kind: string, id: string): string {
@@ -1221,11 +1267,23 @@ function App() {
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
                   onFocus={() => setCommandPaletteOpen(false)}
-                  placeholder="Ask the Agent what you need. The answer will appear below automatically."
+                  placeholder="Ask the Agent what you need. Press Enter to send, Shift+Enter for a new line."
                 />
 
                 <div className="reference-chips">
+                  {composerMentions.map((mention) => (
+                    <span className="reference-chip mention" key={mention.uri}>
+                      @ · {mention.label}
+                      <button
+                        aria-label={`Remove ${mention.label}`}
+                        onClick={() => removeComposerMention(mention.uri)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
                   {fileRefs.map((ref) => (
                     <span className="reference-chip file" key={ref}>
                       file · {ref.split(/[\\/]/).pop()}
@@ -1266,7 +1324,7 @@ function App() {
                   />
                   <button
                     className="send-button"
-                    disabled={!selectedWorkspaceId || !activeRunnableProfile || !prompt.trim()}
+                    disabled={!canSendRun}
                     onClick={() => void createRun()}
                   >
                     Send
