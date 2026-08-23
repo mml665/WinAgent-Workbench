@@ -40,9 +40,9 @@ const agentApps: Array<{ id: AgentAppId; label: string; icon: string; descriptio
   },
   {
     id: "workbuddy",
-    label: "WorkBuddy",
-    icon: "W",
-    description: "Use a WorkBuddy-compatible Agent when its CLI is installed."
+    label: "CodeBuddy",
+    icon: "Cb",
+    description: "Run Tencent CodeBuddy CLI tasks for WorkBuddy-compatible coding workflows."
   },
   {
     id: "qoder",

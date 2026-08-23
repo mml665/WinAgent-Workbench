@@ -43,29 +43,38 @@ const defaultAdapters: Array<{
   {
     id: "qoder",
     label: "Qoder",
-    command: "qoder",
-    defaultArgs: [],
+    command: "qodercli",
+    defaultArgs: ["-p"],
     installState: "external",
-    capabilities: {
-      streaming: false,
-      stdin: false,
-      nonInteractive: false,
-      launcherOnly: true,
-      kind: "editor-launcher"
-    }
-  },
-  {
-    id: "workbuddy",
-    label: "WorkBuddy",
-    command: "workbuddy",
-    defaultArgs: [],
-    installState: "missing",
     capabilities: {
       streaming: true,
       stdin: true,
       nonInteractive: true,
       workspaceCwd: true,
-      kind: "agent-runtime"
+      kind: "agent-runtime",
+      cliMode: "print",
+      commandCandidates: ["qodercli", "qoder"],
+      headlessHelpFlags: ["--print", "-p"],
+      installHint: "Install Qoder CLI with: irm https://qoder.com/install.ps1 | iex"
+    }
+  },
+  {
+    id: "workbuddy",
+    label: "CodeBuddy",
+    command: "codebuddy",
+    defaultArgs: ["-p"],
+    installState: "external",
+    capabilities: {
+      streaming: true,
+      stdin: true,
+      nonInteractive: true,
+      workspaceCwd: true,
+      kind: "agent-runtime",
+      cliMode: "print",
+      productAlias: "WorkBuddy",
+      commandCandidates: ["codebuddy", "cbc"],
+      headlessHelpFlags: ["--print", "-p"],
+      installHint: "Install CodeBuddy CLI with: npm install -g @tencent-ai/codebuddy-code"
     }
   }
 ];
@@ -109,9 +118,9 @@ export class AgentReadinessService {
     }
     return this.agents.create({
       adapterId: adapter.id,
-      name: adapter.label,
-      command: adapter.command,
-      args: adapter.defaultArgs,
+      name: readiness.label,
+      command: readiness.command,
+      args: readiness.recommendedArgs,
       env: {},
       cwd,
       capabilities: adapter.capabilities
@@ -125,7 +134,9 @@ export class AgentReadinessService {
   }
 
   private inspect(adapter: AgentAdapterRecord, profiles: AgentRecord[]): AgentReadinessRecord {
-    const installedPath = findCommand(adapter.command);
+    const resolvedCommand = resolveCommand(adapter);
+    const installedPath = resolvedCommand?.installedPath;
+    const command = resolvedCommand?.command ?? adapter.command;
     const profile = profiles.find((agent) => isProfileForAdapter(agent, adapter));
     const supportsStreaming = adapter.capabilities.streaming === true;
     const launcherOnly = adapter.capabilities.launcherOnly === true;
@@ -140,12 +151,36 @@ export class AgentReadinessService {
       return {
         id: adapter.id,
         label: adapter.label,
-        command: adapter.command,
+        command,
         status: "missing",
         supportsStreaming,
         recommendedArgs: adapter.defaultArgs,
         profileId: profile?.id,
-        message: `${adapter.label} command was not found on PATH.`
+        message: `${adapter.label} command was not found on PATH. ${stringValue(adapter.capabilities.installHint) ?? ""}`.trim()
+      };
+    }
+    const headlessHelpFlags = stringArray(adapter.capabilities.headlessHelpFlags);
+    if (headlessHelpFlags && !supportsRequiredHelpFlag(command, headlessHelpFlags)) {
+      if (profile) {
+        this.agents.updateRuntimeMetadata(profile.id, {
+          adapterId: adapter.id,
+          capabilities: adapter.capabilities,
+          readinessStatus: "launcher"
+        });
+      }
+      return {
+        id: adapter.id,
+        label: adapter.label,
+        command,
+        status: "launcher",
+        installedPath,
+        supportsStreaming: false,
+        recommendedArgs: adapter.defaultArgs,
+        profileId: profile?.id,
+        message:
+          `${adapter.label} command "${command}" is installed, but it does not expose headless print mode (${headlessHelpFlags.join(
+            " or "
+          )}). ${stringValue(adapter.capabilities.installHint) ?? ""}`.trim()
       };
     }
     if (launcherOnly) {
@@ -159,7 +194,7 @@ export class AgentReadinessService {
       return {
         id: adapter.id,
         label: adapter.label,
-        command: adapter.command,
+        command,
         status: "launcher",
         installedPath,
         supportsStreaming: false,
@@ -170,7 +205,7 @@ export class AgentReadinessService {
     }
     const authStatusArgs = stringArray(adapter.capabilities.authStatusArgs);
     if (authStatusArgs) {
-      const auth = inspectAuth(adapter.command, authStatusArgs);
+      const auth = inspectAuth(command, authStatusArgs);
       if (!auth.ready) {
         if (profile) {
           this.agents.updateRuntimeMetadata(profile.id, {
@@ -182,7 +217,7 @@ export class AgentReadinessService {
         return {
           id: adapter.id,
           label: adapter.label,
-          command: adapter.command,
+          command,
           status: "unsupported",
           installedPath,
           supportsStreaming,
@@ -203,7 +238,7 @@ export class AgentReadinessService {
       return {
         id: adapter.id,
         label: adapter.label,
-        command: adapter.command,
+        command,
         status: "unsupported",
         installedPath,
         supportsStreaming: false,
@@ -222,7 +257,7 @@ export class AgentReadinessService {
     return {
       id: adapter.id,
       label: adapter.label,
-      command: adapter.command,
+      command,
       status: "ready",
       installedPath,
       supportsStreaming: true,
@@ -239,12 +274,41 @@ function isProfileForAdapter(agent: AgentRecord, adapter: AgentAdapterRecord): b
   return (
     agent.adapterId === adapter.id ||
     agent.name.toLowerCase() === adapter.label.toLowerCase() ||
-    agent.command.toLowerCase() === adapter.command.toLowerCase()
+    agent.command.toLowerCase() === adapter.command.toLowerCase() ||
+    (stringArray(adapter.capabilities.commandCandidates) ?? [])
+      .map((candidate) => candidate.toLowerCase())
+      .includes(agent.command.toLowerCase())
   );
 }
 
 function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function resolveCommand(adapter: AgentAdapterRecord): { command: string; installedPath: string } | undefined {
+  const candidates = stringArray(adapter.capabilities.commandCandidates) ?? [adapter.command];
+  for (const candidate of candidates) {
+    const installedPath = findCommand(candidate);
+    if (installedPath) {
+      return { command: candidate, installedPath };
+    }
+  }
+  return undefined;
+}
+
+function supportsRequiredHelpFlag(command: string, flags: string[]): boolean {
+  const result = spawnSync(command, ["--help"], {
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false,
+    timeout: 5000
+  });
+  const help = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return flags.some((flag) => help.includes(flag));
 }
 
 function inspectAuth(command: string, args: string[]): { ready: true } | { ready: false; message: string } {
