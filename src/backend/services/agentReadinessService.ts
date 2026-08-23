@@ -75,7 +75,6 @@ const defaultAdapters: Array<{
       productAlias: "WorkBuddy",
       commandCandidates: ["codebuddy", "cbc"],
       headlessHelpFlags: ["--print", "-p"],
-      authLoginHint: "Run codebuddy login before using CodeBuddy as an Agent.",
       installHint: "Install CodeBuddy CLI with: npm install -g @tencent-ai/codebuddy-code"
     }
   }
