@@ -385,14 +385,17 @@ function App() {
       <section className="desktop-stage">
         <article className="workspace-window agent-window">
           <div className="window-titlebar">
-            <div className="traffic-lights">
-              <span />
-              <span />
-              <span />
+            <div className="window-app-id">
+              <span className="window-app-icon">W</span>
+              <strong>Codex</strong>
             </div>
-            <strong>Codex</strong>
             <span className="window-spacer" />
-            <button onClick={() => setActiveWindow("runs")}>Session history</button>
+            <button className="title-action" onClick={() => setActiveWindow("runs")}>Session history</button>
+            <div className="windows-controls" aria-hidden="true">
+              <span>—</span>
+              <span>□</span>
+              <span>×</span>
+            </div>
           </div>
 
           <div className="agent-layout">
@@ -582,9 +585,18 @@ function App() {
         <div className="modal-backdrop" onClick={() => setReferencePickerOpen(false)}>
           <section className="reference-picker" onClick={(event) => event.stopPropagation()}>
             <div className="window-titlebar">
-              <strong>Pick workspace references</strong>
+              <div className="window-app-id">
+                <span className="window-app-icon">+</span>
+                <strong>Pick workspace references</strong>
+              </div>
               <span className="window-spacer" />
-              <button onClick={() => setReferencePickerOpen(false)}>×</button>
+              <div className="windows-controls">
+                <span aria-hidden="true">—</span>
+                <span aria-hidden="true">□</span>
+                <button className="win-control close" onClick={() => setReferencePickerOpen(false)} aria-label="Close reference picker">
+                  ×
+                </button>
+              </div>
             </div>
             <div className="reference-picker-grid">
               <aside>
@@ -635,15 +647,29 @@ function App() {
 
       <section className={`workspace-window floating-window ${activeWindow ? "open" : ""}`}>
         <div className="window-titlebar">
-          <strong>
-            {activeWindow === "apps" ? "Applications" : null}
-            {activeWindow === "files" ? "Files" : null}
-            {activeWindow === "memory" ? "Memory" : null}
-            {activeWindow === "mcp" ? "Skill & MCP" : null}
-            {activeWindow === "runs" ? "Runs" : null}
-          </strong>
+          <div className="window-app-id">
+            <span className="window-app-icon">
+              {activeWindow === "apps" ? "A" : null}
+              {activeWindow === "files" ? "F" : null}
+              {activeWindow === "memory" ? "M" : null}
+              {activeWindow === "mcp" ? "T" : null}
+              {activeWindow === "runs" ? "R" : null}
+            </span>
+            <strong>
+              {activeWindow === "apps" ? "Applications" : null}
+              {activeWindow === "files" ? "Files" : null}
+              {activeWindow === "memory" ? "Memory" : null}
+              {activeWindow === "mcp" ? "Skill & MCP" : null}
+              {activeWindow === "runs" ? "Runs" : null}
+            </strong>
+          </div>
           <span className="window-spacer" />
-          <button onClick={() => setActiveWindow("apps")}>⌂</button>
+          <button className="title-action" onClick={() => setActiveWindow("apps")}>Home</button>
+          <div className="windows-controls" aria-hidden="true">
+            <span>—</span>
+            <span>□</span>
+            <span>×</span>
+          </div>
         </div>
 
         {activeWindow === "apps" ? (
@@ -815,6 +841,7 @@ function App() {
       </section>
 
       <nav className="workspace-dock" aria-label="Workspace applications">
+        <button className="start-button" onClick={() => setActiveWindow("apps")}>⊞</button>
         <button className={activeWindow === "apps" ? "active" : ""} onClick={() => setActiveWindow("apps")}>Apps</button>
         <button className={activeWindow === "files" ? "active" : ""} onClick={() => setActiveWindow("files")}>Files</button>
         <button className={activeWindow === "memory" ? "active" : ""} onClick={() => setActiveWindow("memory")}>Memory</button>

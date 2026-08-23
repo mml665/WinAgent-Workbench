@@ -118,9 +118,10 @@ pre {
   overflow: hidden;
   padding: 24px 24px 96px;
   background:
-    radial-gradient(circle at 24% 24%, rgba(255, 208, 148, 0.88), transparent 26%),
-    radial-gradient(circle at 72% 16%, rgba(176, 213, 255, 0.7), transparent 28%),
-    linear-gradient(180deg, #25354d 0%, #bfc8c4 42%, #c88e46 78%, #171d29 100%);
+    radial-gradient(circle at 18% 18%, rgba(0, 120, 212, 0.72), transparent 30%),
+    radial-gradient(circle at 82% 20%, rgba(124, 58, 237, 0.46), transparent 28%),
+    radial-gradient(circle at 56% 78%, rgba(56, 189, 248, 0.45), transparent 28%),
+    linear-gradient(135deg, #eaf3ff 0%, #c8dcff 38%, #f1f5fb 72%, #d7e1f3 100%);
 }
 
 .tutti-shell::before {
@@ -137,15 +138,15 @@ pre {
 
 .tutti-shell::after {
   position: absolute;
-  right: 10%;
-  bottom: 11%;
-  left: 8%;
-  height: 26%;
+  right: 0;
+  bottom: 58px;
+  left: 0;
+  height: 38%;
   content: "";
   background:
-    radial-gradient(ellipse at 22% 100%, rgba(65, 78, 38, 0.55), transparent 46%),
-    radial-gradient(ellipse at 76% 100%, rgba(105, 76, 34, 0.58), transparent 42%);
-  filter: blur(5px);
+    radial-gradient(ellipse at 18% 90%, rgba(59, 130, 246, 0.22), transparent 42%),
+    radial-gradient(ellipse at 86% 82%, rgba(147, 197, 253, 0.22), transparent 40%);
+  filter: blur(18px);
   pointer-events: none;
 }
 
@@ -167,7 +168,7 @@ pre {
   color: rgba(255, 255, 255, 0.62);
   font-size: 120px;
   letter-spacing: -22px;
-  opacity: 0.48;
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -187,7 +188,7 @@ pre {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
-  color: white;
+  color: #172033;
 }
 
 .brand-lockup {
@@ -201,9 +202,9 @@ pre {
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.58);
   font-weight: 800;
   box-shadow: var(--shadow-soft);
 }
@@ -216,7 +217,7 @@ pre {
 
 .brand-lockup small,
 .workspace-status {
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(23, 32, 51, 0.70);
 }
 
 .workspace-status {
@@ -229,10 +230,10 @@ pre {
 
 .glass-button,
 .status-pill {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  background: rgba(20, 27, 38, 0.28);
-  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.56);
+  color: #172033;
   padding: 7px 11px;
   backdrop-filter: blur(18px);
 }
@@ -248,11 +249,11 @@ pre {
 .control-center,
 .reference-picker {
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: var(--shadow-panel);
-  backdrop-filter: blur(22px);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 12px;
+  background: rgba(250, 252, 255, 0.88);
+  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(28px) saturate(1.18);
 }
 
 .agent-window {
@@ -262,40 +263,73 @@ pre {
 .window-titlebar {
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-height: 46px;
+  gap: 10px;
+  min-height: 42px;
   border-bottom: 1px solid var(--line);
-  padding: 0 14px;
-  background: rgba(255, 255, 255, 0.7);
+  padding: 0 0 0 12px;
+  background: rgba(248, 250, 253, 0.92);
+  user-select: none;
 }
 
-.window-titlebar button {
+.window-titlebar .title-action {
   padding: 5px 9px;
   border-radius: 8px;
   font-size: 12px;
 }
 
-.traffic-lights {
+.window-app-id {
   display: flex;
-  gap: 7px;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 
-.traffic-lights span {
-  width: 11px;
-  height: 11px;
-  border-radius: 999px;
+.window-app-id strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.traffic-lights span:nth-child(1) {
-  background: #ff5f57;
+.window-app-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #2563eb, #60a5fa);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
 }
 
-.traffic-lights span:nth-child(2) {
-  background: #ffbd2e;
+.windows-controls {
+  display: grid;
+  align-self: stretch;
+  grid-template-columns: repeat(3, 46px);
+  margin-left: 4px;
 }
 
-.traffic-lights span:nth-child(3) {
-  background: #28c840;
+.windows-controls span,
+.windows-controls .win-control {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(43, 49, 58, 0.82);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.windows-controls span:hover,
+.windows-controls .win-control:hover {
+  background: rgba(20, 27, 38, 0.08);
+}
+
+.windows-controls .close:hover {
+  background: #c42b1c;
+  color: white;
 }
 
 .window-spacer {
@@ -410,7 +444,7 @@ pre {
   width: 48px;
   height: 48px;
   place-items: center;
-  border-radius: 15px;
+  border-radius: 10px;
   background:
     linear-gradient(135deg, rgba(65, 130, 245, 0.95), rgba(109, 127, 245, 0.9)),
     white;
@@ -865,25 +899,53 @@ pre {
 .workspace-dock {
   position: fixed;
   z-index: 4;
-  right: 50%;
-  bottom: 22px;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
-  gap: 10px;
-  transform: translateX(50%);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.38);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.20);
-  padding: 10px;
-  backdrop-filter: blur(20px);
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 58px;
+  border-top: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(243, 247, 252, 0.82);
+  box-shadow: 0 -14px 34px rgba(15, 23, 42, 0.10);
+  padding: 7px 16px;
+  backdrop-filter: blur(26px) saturate(1.22);
 }
 
 .workspace-dock button {
-  min-width: 58px;
-  min-height: 48px;
-  border-radius: 16px;
-  padding: 8px 10px;
+  position: relative;
+  min-width: 44px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  padding: 7px 10px;
   font-weight: 700;
+}
+
+.workspace-dock button:hover {
+  border-color: rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.workspace-dock button.active::after {
+  position: absolute;
+  right: 16px;
+  bottom: 4px;
+  left: 16px;
+  height: 3px;
+  border-radius: 999px;
+  background: #2563eb;
+  content: "";
+}
+
+.workspace-dock .start-button {
+  margin-right: 8px;
+  background: rgba(255, 255, 255, 0.54);
+  color: #2563eb;
+  font-size: 20px;
 }
 
 .toast-error {
