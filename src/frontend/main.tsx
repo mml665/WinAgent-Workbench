@@ -23,7 +23,7 @@ import "./styles.css";
 const apiBase = "http://127.0.0.1:8787";
 const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "command", "run_summary"];
 type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs";
-type AgentAppId = "codex" | "workbuddy" | "qoder";
+type AgentAppId = "codex" | "claude" | "workbuddy" | "qoder";
 
 const agentApps: Array<{ id: AgentAppId; label: string; icon: string; description: string }> = [
   {
@@ -31,6 +31,12 @@ const agentApps: Array<{ id: AgentAppId; label: string; icon: string; descriptio
     label: "Codex",
     icon: "C",
     description: "Run non-interactive Codex tasks inside this workspace."
+  },
+  {
+    id: "claude",
+    label: "Claude",
+    icon: "Cl",
+    description: "Run Claude Code CLI tasks through non-interactive print mode."
   },
   {
     id: "workbuddy",
@@ -124,6 +130,7 @@ function readinessLabel(readiness?: AgentReadinessRecord): string {
   if (readiness.status === "ready") return readiness.profileId ? "Ready" : "Can install";
   if (readiness.status === "launcher") return "Launcher only";
   if (readiness.status === "missing") return "Not installed";
+  if (/not authenticated|not logged in|auth login/i.test(readiness.message)) return "Login required";
   return "Unsupported";
 }
 
@@ -191,7 +198,27 @@ function App() {
   const [liveOutputExpanded, setLiveOutputExpanded] = useState(false);
   const [error, setError] = useState("");
 
-  const selectedRun = runs[0];
+  const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
+  const activeAgentApp = agentApps.find((app) => app.id === activeAgentAppId) ?? agentApps[0];
+  const activeAgentReadiness = agentReadiness.find((item) => item.id === activeAgentApp.id);
+  const activeAgentProfile = activeAgentReadiness?.profileId
+    ? agents.find((agent) => agent.id === activeAgentReadiness.profileId)
+    : undefined;
+  const activeRunnableProfile =
+    activeAgentReadiness?.status === "ready" && activeAgentProfile ? activeAgentProfile : undefined;
+  const selectedAgent = activeRunnableProfile;
+  const sortedRuns = [...runs].sort((left, right) => runTimestamp(right) - runTimestamp(left));
+  const scopedRuns = activeRunnableProfile
+    ? sortedRuns.filter((run) => run.agentId === activeRunnableProfile.id)
+    : [];
+  const runningRuns = scopedRuns.filter((run) => run.status === "running" || run.status === "queued");
+  const failedRuns = scopedRuns.filter((run) => run.status === "failed");
+  const completedRuns = scopedRuns.filter((run) => run.status === "completed");
+  const attentionGroups = groupRunsByMessage(failedRuns).slice(0, 3);
+  const runningGroups = groupRunsByMessage(runningRuns).slice(0, 3);
+  const completedGroups = groupRunsByMessage(completedRuns).slice(0, 2);
+  const recentRuns = scopedRuns.slice(0, 8);
+  const selectedRun = scopedRuns[0];
   const selectedEvents = selectedRun ? events[selectedRun.id] ?? [] : [];
 
   useEffect(() => {
@@ -199,14 +226,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (selectedWorkspaceId && selectedAgentId && agentReadiness.length > 0) {
+    if (selectedWorkspaceId && agentReadiness.length > 0) {
       return;
     }
     const retry = window.setInterval(() => {
       void refreshAll();
     }, 3000);
     return () => window.clearInterval(retry);
-  }, [selectedWorkspaceId, selectedAgentId, agentReadiness.length]);
+  }, [selectedWorkspaceId, agentReadiness.length]);
 
   useEffect(() => {
     if (selectedRun) {
@@ -303,9 +330,10 @@ function App() {
     const nextWorkspaceId = nextWorkspaces.some((workspace) => workspace.id === selectedWorkspaceId)
       ? selectedWorkspaceId
       : nextWorkspaces[0]?.id || "";
-    const nextAgentId = nextAgents.some((agent) => agent.id === selectedAgentId)
-      ? selectedAgentId
-      : nextAgents[0]?.id || "";
+    const nextActiveReadiness = nextAgentReadiness.find((item) => item.id === activeAgentAppId);
+    const nextActiveProfileId = nextActiveReadiness?.status === "ready" ? nextActiveReadiness.profileId : undefined;
+    const nextAgentId =
+      nextActiveProfileId && nextAgents.some((agent) => agent.id === nextActiveProfileId) ? nextActiveProfileId : "";
     setSelectedWorkspaceId(nextWorkspaceId);
     setSelectedAgentId(nextAgentId);
     if (nextWorkspaceId) {
@@ -367,13 +395,17 @@ function App() {
   }
 
   async function createRun() {
+    if (!activeRunnableProfile) {
+      setError(`${activeAgentApp.label} does not have a runnable local Agent profile yet.`);
+      return;
+    }
     try {
       const nextTitle = title.trim() || prompt.trim().slice(0, 48) || "Untitled run";
       await api<RunRecord>("/api/runs", {
         method: "POST",
         body: JSON.stringify({
           workspaceId: selectedWorkspaceId,
-          agentId: selectedAgentId,
+          agentId: activeRunnableProfile.id,
           skillId: selectedSkillId || undefined,
           title: nextTitle,
           prompt,
@@ -498,21 +530,6 @@ function App() {
   );
   const selectedAnswer = selectedRun ? runAnswer(selectedRun, selectedEvents) : "";
 
-  const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
-  const activeAgentApp = agentApps.find((app) => app.id === activeAgentAppId) ?? agentApps[0];
-  const activeAgentReadiness = agentReadiness.find((item) => item.id === activeAgentApp.id);
-  const activeAgentProfile = activeAgentReadiness?.profileId
-    ? agents.find((agent) => agent.id === activeAgentReadiness.profileId)
-    : agents.find((agent) => agent.name.toLowerCase() === activeAgentApp.label.toLowerCase());
-  const sortedRuns = [...runs].sort((left, right) => runTimestamp(right) - runTimestamp(left));
-  const runningRuns = sortedRuns.filter((run) => run.status === "running" || run.status === "queued");
-  const failedRuns = sortedRuns.filter((run) => run.status === "failed");
-  const completedRuns = sortedRuns.filter((run) => run.status === "completed");
-  const attentionGroups = groupRunsByMessage(failedRuns).slice(0, 3);
-  const runningGroups = groupRunsByMessage(runningRuns).slice(0, 3);
-  const completedGroups = groupRunsByMessage(completedRuns).slice(0, 2);
-  const recentRuns = sortedRuns.slice(0, 8);
   const visibleMcpServers = mcpServers.slice(0, 6);
   const visibleMcpTools = mcpTools.slice(0, 8);
   const visibleToolCalls = mcpToolCalls.slice(0, 5);
@@ -530,11 +547,14 @@ function App() {
     setActiveAgentAppId(app.id);
     setAgentWindowOpen(true);
     const readiness = agentReadiness.find((item) => item.id === app.id);
-    const profile = readiness?.profileId
-      ? agents.find((agent) => agent.id === readiness.profileId)
-      : agents.find((agent) => agent.name.toLowerCase() === app.label.toLowerCase());
+    const profile =
+      readiness?.status === "ready" && readiness.profileId
+        ? agents.find((agent) => agent.id === readiness.profileId)
+        : undefined;
     if (profile) {
       setSelectedAgentId(profile.id);
+    } else {
+      setSelectedAgentId("");
     }
   }
 
@@ -649,15 +669,21 @@ function App() {
                   <strong>{readinessLabel(activeAgentReadiness)}</strong>
                   <span>{activeAgentReadiness?.message ?? "Checking local Agent runtime."}</span>
                 </div>
-                <select value={selectedAgentId} onChange={(event) => setSelectedAgentId(event.target.value)}>
+                <select
+                  value={activeRunnableProfile?.id ?? ""}
+                  disabled={!activeRunnableProfile}
+                  onChange={(event) => setSelectedAgentId(event.target.value)}
+                >
                   <option value="">No runnable profile</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))}
+                  {activeRunnableProfile ? (
+                    <option value={activeRunnableProfile.id}>{activeRunnableProfile.name}</option>
+                  ) : null}
                 </select>
-                <small>{selectedAgent ? `${selectedAgent.name} is selected for this run.` : "Install or select a runnable Agent profile."}</small>
+                <small>
+                  {selectedAgent
+                    ? `${selectedAgent.name} is selected for this run.`
+                    : `${activeAgentApp.label} is not runnable in this environment.`}
+                </small>
                 {!activeAgentProfile && activeAgentReadiness?.status === "ready" ? (
                   <button className="profile-action" onClick={() => void createAgentProfile(activeAgentApp.id)}>
                     Create {activeAgentApp.label} profile
@@ -670,6 +696,11 @@ function App() {
                 ) : null}
               </div>
               <div className="session-list">
+                {recentRuns.length === 0 ? (
+                  <p className="empty-state">
+                    {activeRunnableProfile ? "No runs for this Agent yet." : "No runnable profile for this Agent."}
+                  </p>
+                ) : null}
                 {recentRuns.map((run) => (
                   <button key={run.id} className="session-item" onClick={() => void loadRunEvents(run.id)}>
                     <strong>{run.title}</strong>
@@ -758,7 +789,7 @@ function App() {
                   />
                   <button
                     className="send-button"
-                    disabled={!selectedWorkspaceId || !selectedAgentId || !prompt.trim()}
+                    disabled={!selectedWorkspaceId || !activeRunnableProfile || !prompt.trim()}
                     onClick={() => void createRun()}
                   >
                     Send
@@ -791,7 +822,11 @@ function App() {
                       <p>{runDisplayMessage(selectedRun, selectedEvents)}</p>
                     </div>
                   ) : (
-                    <p>Start a run or open run details from the message center.</p>
+                    <p>
+                      {activeRunnableProfile
+                        ? "Start a run or open run details from the message center."
+                        : `${activeAgentApp.label} is not runnable yet, so it cannot show a Codex answer.`}
+                    </p>
                   )}
                   <div className="message-actions">
                     <button disabled={!selectedRun} onClick={() => selectedRun ? openRunDetails(selectedRun) : undefined}>

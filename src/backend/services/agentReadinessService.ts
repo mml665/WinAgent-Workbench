@@ -25,6 +25,22 @@ const defaultAdapters: Array<{
     }
   },
   {
+    id: "claude",
+    label: "Claude",
+    command: "claude",
+    defaultArgs: ["-p"],
+    installState: "external",
+    capabilities: {
+      streaming: true,
+      stdin: true,
+      nonInteractive: true,
+      workspaceCwd: true,
+      kind: "agent-runtime",
+      cliMode: "print",
+      authStatusArgs: ["auth", "status"]
+    }
+  },
+  {
     id: "qoder",
     label: "Qoder",
     command: "qoder",
@@ -152,6 +168,30 @@ export class AgentReadinessService {
         message: `${adapter.label} is installed, but this CLI opens the desktop editor instead of running a stdin/stdout Agent task.`
       };
     }
+    const authStatusArgs = stringArray(adapter.capabilities.authStatusArgs);
+    if (authStatusArgs) {
+      const auth = inspectAuth(adapter.command, authStatusArgs);
+      if (!auth.ready) {
+        if (profile) {
+          this.agents.updateRuntimeMetadata(profile.id, {
+            adapterId: adapter.id,
+            capabilities: adapter.capabilities,
+            readinessStatus: "unsupported"
+          });
+        }
+        return {
+          id: adapter.id,
+          label: adapter.label,
+          command: adapter.command,
+          status: "unsupported",
+          installedPath,
+          supportsStreaming,
+          recommendedArgs: adapter.defaultArgs,
+          profileId: profile?.id,
+          message: auth.message
+        };
+      }
+    }
     if (!supportsStreaming) {
       if (profile) {
         this.agents.updateRuntimeMetadata(profile.id, {
@@ -201,6 +241,41 @@ function isProfileForAdapter(agent: AgentRecord, adapter: AgentAdapterRecord): b
     agent.name.toLowerCase() === adapter.label.toLowerCase() ||
     agent.command.toLowerCase() === adapter.command.toLowerCase()
   );
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+}
+
+function inspectAuth(command: string, args: string[]): { ready: true } | { ready: false; message: string } {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false,
+    timeout: 5000
+  });
+  const raw = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+  try {
+    const parsed = JSON.parse(raw) as { loggedIn?: boolean; authMethod?: string; apiProvider?: string };
+    if (parsed.loggedIn === false) {
+      return {
+        ready: false,
+        message: `${command} is installed but not authenticated. Run "${command} auth login" or configure its API key before using it as an Agent.`
+      };
+    }
+    if (parsed.loggedIn === true) {
+      return { ready: true };
+    }
+  } catch {
+    // Fall through to the exit-code check below.
+  }
+  if (result.status !== 0) {
+    return {
+      ready: false,
+      message: raw || `${command} authentication status check failed.`
+    };
+  }
+  return { ready: true };
 }
 
 function findCommand(command: string): string | undefined {

@@ -42,6 +42,15 @@ function Invoke-Api {
     -TimeoutSec 30
 }
 
+function Invoke-ApiArray {
+  param(
+    [string]$Path,
+    [string]$Method = "Get",
+    [object]$Body = $null
+  )
+  return @((Invoke-Api -Path $Path -Method $Method -Body $Body) | ForEach-Object { $_ })
+}
+
 function Test-BackendHealthy {
   try {
     $health = Invoke-Api -Path "/api/health"
@@ -128,13 +137,13 @@ try {
   Assert-True ($workspace.rootPath -eq $acceptanceRoot) "Workspace did not open at expected path"
   Add-Check "workspace open"
 
-  $files = @(Invoke-Api -Path "/api/files?workspaceId=$($workspace.id)")
-  Assert-True (($files | Where-Object { $_.name -eq "README.md" -and $_.kind -eq "file" }).Count -eq 1) "Files API did not list README.md"
+  $files = @(Invoke-ApiArray -Path "/api/files?workspaceId=$($workspace.id)")
+  Assert-True (@($files | Where-Object { $_.name -eq "README.md" -and $_.kind -eq "file" }).Count -eq 1) "Files API did not list README.md"
   Add-Check "files API"
 
   $index = Invoke-Api -Path "/api/workspaces/$($workspace.id)/index" -Method "Post"
   Assert-True ($index.indexed -ge 1) "Workspace index did not index acceptance README"
-  $hits = @(Invoke-Api -Path "/api/workspaces/$($workspace.id)/search?q=WINAGENT_ACCEPTANCE_CONTEXT&limit=5")
+  $hits = @(Invoke-ApiArray -Path "/api/workspaces/$($workspace.id)/search?q=WINAGENT_ACCEPTANCE_CONTEXT&limit=5")
   Assert-True ($hits.Count -ge 1) "Workspace search did not return acceptance marker"
   Add-Check "workspace index and search"
 
@@ -148,21 +157,21 @@ try {
   Assert-True ($memory.content -match "WINAGENT_ACCEPTANCE_CONTEXT") "Workspace memory was not persisted"
   Add-Check "long-term memory write"
 
-  $readiness = @(Invoke-Api -Path "/api/agent-readiness")
+  $readiness = @(Invoke-ApiArray -Path "/api/agent-readiness")
   $codexReady = $readiness | Where-Object { $_.id -eq "codex" } | Select-Object -First 1
   Assert-True ($null -ne $codexReady) "Codex readiness record is missing"
   Assert-True ($codexReady.status -eq "ready") "Codex is not ready: $($codexReady.message)"
   Assert-True ($codexReady.supportsStreaming -eq $true) "Codex is not marked streaming-capable"
   Add-Check "agent readiness"
 
-  $adapters = @(Invoke-Api -Path "/api/agent-adapters")
+  $adapters = @(Invoke-ApiArray -Path "/api/agent-adapters")
   $codexAdapter = $adapters | Where-Object { $_.id -eq "codex" } | Select-Object -First 1
   Assert-True ($null -ne $codexAdapter) "Codex adapter is missing from adapter registry"
   Assert-True ($codexAdapter.capabilities.streaming -eq $true) "Codex adapter does not declare streaming capability"
   Assert-True ($codexAdapter.defaultArgs -contains "exec") "Codex adapter does not declare exec default args"
   Add-Check "agent adapter registry"
 
-  $migrations = @(Invoke-Api -Path "/api/schema-migrations")
+  $migrations = @(Invoke-ApiArray -Path "/api/schema-migrations")
   Assert-True (@($migrations | Where-Object { $_.id -eq "0001_initial_runtime_schema" }).Count -eq 1) "Initial schema migration is missing"
   Assert-True (@($migrations | Where-Object { $_.id -eq "0002_agent_adapters_settings_artifacts" }).Count -eq 1) "Adapter/settings/artifacts schema migration is missing"
   Add-Check "schema migrations"
@@ -177,11 +186,11 @@ try {
       }
     }
   Assert-True ($setting.key -eq "acceptance.lastRun") "Setting write did not return expected key"
-  $settings = @(Invoke-Api -Path "/api/settings")
+  $settings = @(Invoke-ApiArray -Path "/api/settings")
   Assert-True (@($settings | Where-Object { $_.key -eq "acceptance.lastRun" }).Count -eq 1) "Setting was not persisted"
   Add-Check "settings persistence"
 
-  $agents = @(Invoke-Api -Path "/api/agents")
+  $agents = @(Invoke-ApiArray -Path "/api/agents")
   $codexAgent = $agents | Where-Object { $_.name -eq "Codex" } | Select-Object -First 1
   Assert-True ($null -ne $codexAgent) "Codex runnable profile is missing"
   Assert-True ($codexAgent.adapterId -eq "codex") "Codex profile is not linked to the codex adapter"
@@ -189,7 +198,7 @@ try {
   Assert-True (@($agents | Where-Object { $_.name -match "Demo|Smoke|Fail once" }).Count -eq 0) "Demo/smoke Agent profiles leaked into product data"
   Add-Check "agent profiles clean"
 
-  $mcpServers = @(Invoke-Api -Path "/api/mcp-servers")
+  $mcpServers = @(Invoke-ApiArray -Path "/api/mcp-servers")
   Assert-True (@($mcpServers | Where-Object { $_.name -eq "Smoke MCP" }).Count -eq 0) "Smoke MCP leaked into product data"
   Add-Check "mcp data clean"
 
@@ -224,7 +233,7 @@ try {
     $output = ""
     $eventDeadline = (Get-Date).AddSeconds(12)
     do {
-      $events = @(Invoke-Api -Path "/api/runs/$($run.id)/events")
+      $events = @(Invoke-ApiArray -Path "/api/runs/$($run.id)/events")
       $output = $events | ConvertTo-Json -Depth 20
       if ($output -match "WINAGENT_ACCEPTANCE_OK") {
         break

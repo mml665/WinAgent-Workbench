@@ -18,7 +18,9 @@ const smokeRunIds = db
     `SELECT id
      FROM runs
      WHERE title IN ('Windows smoke', 'Retry smoke')
+        OR title = 'Claude adapter smoke'
         OR prompt IN ('Print WINAGENT_SMOKE_OK', 'fail')
+        OR prompt LIKE '%CLAUDE_WINAGENT_OK%'
         OR title LIKE 'Acceptance %'
         OR prompt LIKE '%WINAGENT_ACCEPTANCE_OK%'
         OR retrieval_query LIKE '%WINAGENT_LONG_MEMORY_OK%'
