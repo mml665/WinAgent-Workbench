@@ -14,6 +14,7 @@ The project focuses on a small but engineered loop:
 - Run queue with same-Agent concurrency control, queued cancel, timeout, and retry
 - SQLite persistence through Node 24 `node:sqlite`
 - Windows smoke validation
+- Automated acceptance validation with a real Codex Agent run
 
 ## Quick Start
 
@@ -73,6 +74,18 @@ Windows smoke:
 ```powershell
 npm run smoke:windows
 ```
+
+Full delivery verification:
+
+```powershell
+npm run verify:all
+```
+
+`verify:all` runs TypeScript/Vite build, unit tests, Windows smoke coverage,
+and a Windows acceptance check that validates the frontend page, backend APIs,
+workspace files, retrieval index, long-term memory, clean Agent profiles, and a
+real Codex `exec -` Agent run. Test workspaces, runs, memories, and smoke MCP
+data are cleaned automatically before and after validation.
 
 ## Default Ports
 

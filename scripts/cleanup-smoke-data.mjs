@@ -12,13 +12,21 @@ const smokeRunIds = db
      FROM runs
      WHERE title IN ('Windows smoke', 'Retry smoke')
         OR prompt IN ('Print WINAGENT_SMOKE_OK', 'fail')
-        OR retrieval_query LIKE '%WINAGENT_LONG_MEMORY_OK%'`
+        OR title LIKE 'Acceptance %'
+        OR prompt LIKE '%WINAGENT_ACCEPTANCE_OK%'
+        OR retrieval_query LIKE '%WINAGENT_LONG_MEMORY_OK%'
+        OR retrieval_query LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'`
   )
   .all()
   .map((row) => row.id);
 
 const smokeWorkspaceIds = db
-  .prepare(`SELECT id FROM workspaces WHERE root_path LIKE '%\\.tmp\\space path' OR root_path LIKE '%\\.tmp\\中文路径'`)
+  .prepare(
+    `SELECT id FROM workspaces
+     WHERE root_path LIKE '%\\.tmp\\space path'
+        OR root_path LIKE '%\\.tmp\\中文路径'
+        OR root_path LIKE '%\\.tmp\\acceptance-workspace'`
+  )
   .all()
   .map((row) => row.id);
 
@@ -30,8 +38,12 @@ try {
   db.prepare(
     `DELETE FROM workspace_memories
      WHERE content LIKE '%WINAGENT_LONG_MEMORY_OK%'
+        OR content LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'
+        OR content LIKE '%WINAGENT_ACCEPTANCE_OK%'
         OR content LIKE 'COMPLETED run: Windows smoke%'
-        OR content LIKE 'FAILED run: Retry smoke%'`
+        OR content LIKE 'FAILED run: Retry smoke%'
+        OR content LIKE 'COMPLETED run: Acceptance %'
+        OR content LIKE 'FAILED run: Acceptance %'`
   ).run();
   db.prepare(
     `DELETE FROM mcp_servers
