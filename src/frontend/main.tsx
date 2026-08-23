@@ -3,18 +3,22 @@ import { createRoot } from "react-dom/client";
 import type {
   AgentReadinessRecord,
   AgentRecord,
+  ApprovalRecord,
   FileEntry,
   McpServerRecord,
   McpToolCallRecord,
   McpToolRecord,
   MemoryType,
   RetrievalHit,
+  RunArtifactRecord,
   RunEventRecord,
   RunRecord,
   RunWorkingMemoryRecord,
   RunToolCallRequest,
   SkillRecord,
+  TaskRecord,
   WorkspaceMemoryRecord,
+  WorkspaceReferenceRecord,
   WorkspaceRecord
 } from "../shared/types";
 import type { WebSocketEnvelope } from "../shared/events";
@@ -22,7 +26,7 @@ import "./styles.css";
 
 const apiBase = "http://127.0.0.1:8787";
 const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "command", "run_summary"];
-type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs";
+type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs" | "tasks" | "artifacts" | "references" | "approvals";
 type AgentAppId = "codex" | "claude" | "workbuddy" | "qoder";
 
 const agentApps: Array<{ id: AgentAppId; label: string; icon: string; description: string }> = [
@@ -166,6 +170,10 @@ function App() {
   const [mcpToolCalls, setMcpToolCalls] = useState<McpToolCallRecord[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [events, setEvents] = useState<Record<string, RunEventRecord[]>>({});
+  const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [workspaceReferences, setWorkspaceReferences] = useState<WorkspaceReferenceRecord[]>([]);
+  const [artifacts, setArtifacts] = useState<RunArtifactRecord[]>([]);
   const [workspaceMemories, setWorkspaceMemories] = useState<WorkspaceMemoryRecord[]>([]);
   const [workingMemory, setWorkingMemory] = useState<RunWorkingMemoryRecord | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -177,6 +185,8 @@ function App() {
   const [fileRefs, setFileRefs] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
   const [retrievalQuery, setRetrievalQuery] = useState("workspace agent runtime");
   const [retrievalHits, setRetrievalHits] = useState<RetrievalHit[]>([]);
   const [timeoutMs, setTimeoutMs] = useState(120000);
@@ -220,6 +230,8 @@ function App() {
   const recentRuns = scopedRuns.slice(0, 8);
   const selectedRun = scopedRuns[0];
   const selectedEvents = selectedRun ? events[selectedRun.id] ?? [] : [];
+  const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+  const openTasks = tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled");
 
   useEffect(() => {
     void refreshAll();
@@ -288,6 +300,7 @@ function App() {
     }
     void loadFiles();
     void loadWorkspaceMemories(selectedWorkspaceId);
+    void loadWorkbench(selectedWorkspaceId);
   }, [selectedWorkspaceId, filePath]);
 
   async function refreshAll() {
@@ -339,6 +352,7 @@ function App() {
     if (nextWorkspaceId) {
       try {
         setWorkspaceMemories(await api<WorkspaceMemoryRecord[]>(`/api/workspaces/${nextWorkspaceId}/memories`));
+        await loadWorkbench(nextWorkspaceId);
       } catch (caught) {
         failures.push(`memories: ${caught instanceof Error ? caught.message : String(caught)}`);
       }
@@ -365,6 +379,26 @@ function App() {
       return;
     }
     setWorkspaceMemories(await api<WorkspaceMemoryRecord[]>(`/api/workspaces/${workspaceId}/memories`));
+  }
+
+  async function loadWorkbench(workspaceId = selectedWorkspaceId) {
+    if (!workspaceId) {
+      setTasks([]);
+      setApprovals([]);
+      setWorkspaceReferences([]);
+      setArtifacts([]);
+      return;
+    }
+    const [nextTasks, nextApprovals, nextReferences, nextArtifacts] = await Promise.all([
+      api<TaskRecord[]>(`/api/workspaces/${workspaceId}/tasks`),
+      api<ApprovalRecord[]>(`/api/workspaces/${workspaceId}/approvals`),
+      api<WorkspaceReferenceRecord[]>(`/api/workspaces/${workspaceId}/references`),
+      api<RunArtifactRecord[]>(`/api/workspaces/${workspaceId}/artifacts`)
+    ]);
+    setTasks(nextTasks);
+    setApprovals(nextApprovals);
+    setWorkspaceReferences(nextReferences);
+    setArtifacts(nextArtifacts);
   }
 
   async function loadFiles() {
@@ -439,6 +473,62 @@ function App() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
+  }
+
+  async function createTask() {
+    if (!selectedWorkspaceId || !taskTitle.trim()) {
+      return;
+    }
+    try {
+      await api<TaskRecord>(`/api/workspaces/${selectedWorkspaceId}/tasks`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: taskTitle,
+          description: taskDescription,
+          priority: "normal",
+          assignedAgentId: activeRunnableProfile?.id
+        })
+      });
+      setTaskTitle("");
+      setTaskDescription("");
+      await loadWorkbench(selectedWorkspaceId);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  async function updateTaskStatus(taskId: string, status: TaskRecord["status"]) {
+    await api<TaskRecord>(`/api/tasks/${taskId}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status })
+    });
+    await loadWorkbench(selectedWorkspaceId);
+  }
+
+  async function decideApproval(approvalId: string, status: ApprovalRecord["status"]) {
+    await api<ApprovalRecord>(`/api/approvals/${approvalId}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ status })
+    });
+    await loadWorkbench(selectedWorkspaceId);
+  }
+
+  async function createWorkspaceReference(input: {
+    kind: WorkspaceReferenceRecord["kind"];
+    targetId: string;
+    label: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+    await api<WorkspaceReferenceRecord>(`/api/workspaces/${selectedWorkspaceId}/references`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+    await loadWorkbench(selectedWorkspaceId);
   }
 
   async function cancelRun(runId: string) {
@@ -863,6 +953,51 @@ function App() {
               <strong>{completedRuns.length}</strong>
               <span>Completed</span>
             </div>
+            <div className="metric-card">
+              <strong>{openTasks.length}</strong>
+              <span>Open tasks</span>
+            </div>
+            <div className="metric-card attention">
+              <strong>{pendingApprovals.length}</strong>
+              <span>Approvals</span>
+            </div>
+          </section>
+
+          <section>
+            <h3>Approvals · {pendingApprovals.length}</h3>
+            {pendingApprovals.length === 0 ? <p className="empty-state">No pending approvals.</p> : null}
+            {pendingApprovals.slice(0, 3).map((approval) => (
+              <div className="message-card attention" key={approval.id}>
+                <div className="card-head">
+                  <strong>{approval.title}</strong>
+                  <span>{approval.kind}</span>
+                </div>
+                <p>{approval.description || "Review this item before continuing."}</p>
+                <div className="message-actions">
+                  <button onClick={() => void decideApproval(approval.id, "approved")}>Approve</button>
+                  <button onClick={() => void decideApproval(approval.id, "rejected")}>Reject</button>
+                  <button onClick={() => setActiveWindow("approvals")}>Open</button>
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <section>
+            <h3>Tasks · {openTasks.length}</h3>
+            {openTasks.length === 0 ? <p className="empty-state">No open tasks.</p> : null}
+            {openTasks.slice(0, 3).map((task) => (
+              <div className="message-card compact" key={task.id}>
+                <div className="card-head">
+                  <strong>{task.title}</strong>
+                  <span>{task.status}</span>
+                </div>
+                <p>{task.description || "No description."}</p>
+                <div className="message-actions">
+                  <button onClick={() => setActiveWindow("tasks")}>Open tasks</button>
+                  <button onClick={() => void updateTaskStatus(task.id, "completed")}>Complete</button>
+                </div>
+              </div>
+            ))}
           </section>
 
           <section>
@@ -945,6 +1080,8 @@ function App() {
                 <button className="active" onClick={() => setActiveWindow("files")}>Local files</button>
                 <button onClick={() => setActiveWindow("memory")}>Memories</button>
                 <button onClick={() => setActiveWindow("runs")}>Runs</button>
+                <button onClick={() => setActiveWindow("artifacts")}>Artifacts</button>
+                <button onClick={() => setActiveWindow("references")}>References</button>
                 <button onClick={() => setActiveWindow("mcp")}>MCP tools</button>
               </aside>
               <div className="reference-results">
@@ -968,6 +1105,37 @@ function App() {
                     <span>{file.kind}</span>
                     <strong>{file.name}</strong>
                     <small>{file.path}</small>
+                  </button>
+                ))}
+                {artifacts.slice(0, 5).map((artifact) => (
+                  <button
+                    key={artifact.id}
+                    className="reference-result"
+                    onClick={() => {
+                      appendPromptToken(`@artifact:${artifact.name}`);
+                      void createWorkspaceReference({
+                        kind: "artifact",
+                        targetId: artifact.id,
+                        label: artifact.name,
+                        summary: artifact.contentText?.slice(0, 160),
+                        metadata: { runId: artifact.runId, mimeType: artifact.mimeType }
+                      });
+                    }}
+                  >
+                    <span>artifact</span>
+                    <strong>{artifact.name}</strong>
+                    <small>{artifact.mimeType}</small>
+                  </button>
+                ))}
+                {workspaceReferences.slice(0, 5).map((reference) => (
+                  <button
+                    key={reference.id}
+                    className="reference-result"
+                    onClick={() => appendPromptToken(`@${reference.kind}:${reference.label}`)}
+                  >
+                    <span>{reference.kind}</span>
+                    <strong>{reference.label}</strong>
+                    <small>{reference.summary}</small>
                   </button>
                 ))}
               </div>
@@ -997,6 +1165,10 @@ function App() {
               {activeWindow === "memory" ? "M" : null}
               {activeWindow === "mcp" ? "T" : null}
               {activeWindow === "runs" ? "R" : null}
+              {activeWindow === "tasks" ? "Ta" : null}
+              {activeWindow === "artifacts" ? "Ar" : null}
+              {activeWindow === "references" ? "Re" : null}
+              {activeWindow === "approvals" ? "Ap" : null}
             </span>
             <strong>
               {activeWindow === "apps" ? "Applications" : null}
@@ -1004,6 +1176,10 @@ function App() {
               {activeWindow === "memory" ? "Memory" : null}
               {activeWindow === "mcp" ? "Skill & MCP" : null}
               {activeWindow === "runs" ? "Runs" : null}
+              {activeWindow === "tasks" ? "Task Center" : null}
+              {activeWindow === "artifacts" ? "Artifacts" : null}
+              {activeWindow === "references" ? "References" : null}
+              {activeWindow === "approvals" ? "Approvals" : null}
             </strong>
           </div>
           <span className="window-spacer" />
@@ -1037,6 +1213,8 @@ function App() {
             {[
               ["Task Center", "Break goals into sub-tasks and send them to agents.", "Open"],
               ["Reference Picker", "Attach files, memories, tool calls, and run outputs.", "Open"],
+              ["Artifacts", "Review generated outputs and reuse them as context.", "Open"],
+              ["Approvals", "Review failed runs and pending human decisions.", "Open"],
               ["Memory Hub", "Curate long-term memory and inspect working memory.", "Open"],
               ["MCP Tools", "Start local tool servers and attach calls to a run.", "Open"],
               ["Run Reports", "Review execution history and export artifacts.", "Open"],
@@ -1047,10 +1225,12 @@ function App() {
                 key={name}
                 onClick={() => {
                   if (name === "Reference Picker") setReferencePickerOpen(true);
+                  if (name === "Artifacts") setActiveWindow("artifacts");
+                  if (name === "Approvals") setActiveWindow("approvals");
                   if (name === "Memory Hub") setActiveWindow("memory");
                   if (name === "MCP Tools") setActiveWindow("mcp");
                   if (name === "Run Reports") setActiveWindow("runs");
-                  if (name === "Task Center") setActiveWindow("runs");
+                  if (name === "Task Center") setActiveWindow("tasks");
                 }}
               >
                 <span className="app-icon">{name.slice(0, 2)}</span>
@@ -1175,6 +1355,142 @@ function App() {
           </div>
         ) : null}
 
+        {activeWindow === "tasks" ? (
+          <div className="window-content split-content">
+            <div className="memory-editor">
+              <label>
+                Task title
+                <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
+              </label>
+              <label>
+                Task description
+                <textarea value={taskDescription} onChange={(event) => setTaskDescription(event.target.value)} />
+              </label>
+              <div className="file-actions">
+                <button disabled={!selectedWorkspaceId || !taskTitle.trim()} onClick={() => void createTask()}>
+                  Create task
+                </button>
+                <button onClick={() => void loadWorkbench()}>Reload</button>
+              </div>
+              <p className="empty-state">
+                Tasks are durable workspace objects. Assign one to the active Agent by creating a run from its prompt.
+              </p>
+            </div>
+            <div className="run-list">
+              {tasks.length === 0 ? <p className="empty-state">No tasks yet.</p> : null}
+              {tasks.map((task) => (
+                <div className="run-row" key={task.id}>
+                  <div>
+                    <strong>{task.title}</strong>
+                    <span>{task.status}</span>
+                  </div>
+                  <small>{task.description || "No description."}</small>
+                  <div className="message-actions">
+                    <button onClick={() => void updateTaskStatus(task.id, "in_progress")}>Start</button>
+                    <button onClick={() => void updateTaskStatus(task.id, "review")}>Review</button>
+                    <button onClick={() => void updateTaskStatus(task.id, "completed")}>Done</button>
+                    <button
+                      onClick={() => {
+                        setPrompt(task.description || task.title);
+                        setTitle(task.title);
+                        setActiveWindow(null);
+                      }}
+                    >
+                      Use as prompt
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {activeWindow === "artifacts" ? (
+          <div className="window-content split-content">
+            <div className="run-list">
+              {artifacts.length === 0 ? <p className="empty-state">No artifacts yet. Completed runs will create outputs here.</p> : null}
+              {artifacts.map((artifact) => (
+                <div className="run-row" key={artifact.id}>
+                  <div>
+                    <strong>{artifact.name}</strong>
+                    <span>{artifact.kind}</span>
+                  </div>
+                  <small>{artifact.mimeType}</small>
+                  <div className="message-actions">
+                    <button onClick={() => appendPromptToken(`@artifact:${artifact.name}`)}>Mention</button>
+                    <button
+                      onClick={() =>
+                        void createWorkspaceReference({
+                          kind: "artifact",
+                          targetId: artifact.id,
+                          label: artifact.name,
+                          summary: artifact.contentText?.slice(0, 160),
+                          metadata: { runId: artifact.runId }
+                        })
+                      }
+                    >
+                      Save reference
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="preview-pane">
+              <h3>Latest artifact</h3>
+              <pre>{artifacts[0]?.contentText ?? "No artifact selected."}</pre>
+            </div>
+          </div>
+        ) : null}
+
+        {activeWindow === "references" ? (
+          <div className="window-content split-content">
+            <div className="run-list">
+              {workspaceReferences.length === 0 ? <p className="empty-state">No reusable references yet.</p> : null}
+              {workspaceReferences.map((reference) => (
+                <div className="run-row" key={reference.id}>
+                  <div>
+                    <strong>{reference.label}</strong>
+                    <span>{reference.kind}</span>
+                  </div>
+                  <small>{reference.summary || reference.targetId}</small>
+                  <button onClick={() => appendPromptToken(`@${reference.kind}:${reference.label}`)}>Mention</button>
+                </div>
+              ))}
+            </div>
+            <div className="preview-pane">
+              <h3>Reference model</h3>
+              <p>References normalize files, runs, memories, artifacts, tasks, and agents into one reusable context list.</p>
+            </div>
+          </div>
+        ) : null}
+
+        {activeWindow === "approvals" ? (
+          <div className="window-content split-content">
+            <div className="run-list">
+              {approvals.length === 0 ? <p className="empty-state">No approvals yet.</p> : null}
+              {approvals.map((approval) => (
+                <div className="run-row" key={approval.id}>
+                  <div>
+                    <strong>{approval.title}</strong>
+                    <span>{approval.status}</span>
+                  </div>
+                  <small>{approval.description || approval.kind}</small>
+                  {approval.status === "pending" ? (
+                    <div className="message-actions">
+                      <button onClick={() => void decideApproval(approval.id, "approved")}>Approve</button>
+                      <button onClick={() => void decideApproval(approval.id, "rejected")}>Reject</button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <div className="preview-pane">
+              <h3>Approval queue</h3>
+              <p>Failed runs and human decisions land here instead of being buried inside logs.</p>
+            </div>
+          </div>
+        ) : null}
+
         {activeWindow === "runs" ? (
           <div className="window-content split-content">
             <div className="run-list">
@@ -1218,7 +1534,9 @@ function App() {
         ))}
         <button className={activeWindow === "apps" ? "active" : ""} onClick={() => setActiveWindow("apps")}>Apps</button>
         <button className={activeWindow === "files" ? "active" : ""} onClick={() => setActiveWindow("files")}>Files</button>
+        <button className={activeWindow === "tasks" ? "active" : ""} onClick={() => setActiveWindow("tasks")}>Tasks</button>
         <button className={activeWindow === "memory" ? "active" : ""} onClick={() => setActiveWindow("memory")}>Memory</button>
+        <button className={activeWindow === "artifacts" ? "active" : ""} onClick={() => setActiveWindow("artifacts")}>Artifacts</button>
         <button className={activeWindow === "mcp" ? "active" : ""} onClick={() => setActiveWindow("mcp")}>MCP</button>
         <button className={activeWindow === "runs" ? "active" : ""} onClick={() => setActiveWindow("runs")}>Runs</button>
         <button onClick={() => setReferencePickerOpen(true)}>+</button>

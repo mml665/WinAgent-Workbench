@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $acceptanceRoot = Join-Path $repoRoot ".tmp\acceptance-workspace"
+$backendOut = Join-Path $repoRoot ".tmp\acceptance-backend.out.log"
+$backendErr = Join-Path $repoRoot ".tmp\acceptance-backend.err.log"
 $backend = $null
 $web = $null
 $checks = New-Object System.Collections.Generic.List[string]
@@ -17,10 +19,42 @@ function Add-Check([string]$Name) {
   Write-Host "[ok] $Name"
 }
 
+function Stop-ExistingBackend {
+  $escapedRepoRoot = [Regex]::Escape($repoRoot)
+  $currentPid = $PID
+  $portProcesses = Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique
+  foreach ($processId in $portProcesses) {
+    if ($processId -ne 0 -and $processId -ne $currentPid) {
+      Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+  }
+  $processes = Get-CimInstance Win32_Process |
+    Where-Object {
+      $_.ProcessId -ne $currentPid -and
+      $_.CommandLine -match $escapedRepoRoot -and
+      $_.CommandLine -match "src[\\/]backend[\\/]server\.ts"
+    }
+  foreach ($process in $processes) {
+    Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Assert-True([object]$Condition, [string]$Message) {
   $passed = if ($Condition -is [array]) { $Condition.Count -gt 0 } else { [bool]$Condition }
   if (-not $passed) {
     throw $Message
+  }
+}
+
+function Show-BackendLogs {
+  if (Test-Path -LiteralPath $backendOut) {
+    Write-Host "[backend stdout]"
+    Get-Content -LiteralPath $backendOut -ErrorAction SilentlyContinue | Select-Object -Last 80 | Out-Host
+  }
+  if (Test-Path -LiteralPath $backendErr) {
+    Write-Host "[backend stderr]"
+    Get-Content -LiteralPath $backendErr -ErrorAction SilentlyContinue | Select-Object -Last 80 | Out-Host
   }
 }
 
@@ -32,11 +66,12 @@ function Invoke-Api {
   )
   $uri = "http://127.0.0.1:$BackendPort$Path"
   if ($null -eq $Body) {
-    return Invoke-RestMethod -Uri $uri -Method $Method -TimeoutSec 30
+    return Invoke-RestMethod -Uri $uri -Method $Method -DisableKeepAlive -TimeoutSec 30
   }
   return Invoke-RestMethod `
     -Uri $uri `
     -Method $Method `
+    -DisableKeepAlive `
     -ContentType "application/json" `
     -Body ($Body | ConvertTo-Json -Depth 12) `
     -TimeoutSec 30
@@ -62,7 +97,7 @@ function Test-BackendHealthy {
 
 function Test-WebReady {
   try {
-    $html = Invoke-WebRequest -Uri "http://127.0.0.1:$WebPort/" -UseBasicParsing -TimeoutSec 5
+    $html = Invoke-WebRequest -Uri "http://127.0.0.1:$WebPort/" -DisableKeepAlive -UseBasicParsing -TimeoutSec 5
     return ($html.StatusCode -eq 200 -and $html.Content -match 'id="root"')
   } catch {
     return $false
@@ -82,6 +117,9 @@ function Wait-Until {
     }
     Start-Sleep -Milliseconds 500
   } while ((Get-Date) -lt $deadline)
+  if ($Name -eq "Backend") {
+    Show-BackendLogs
+  }
   throw "$Name did not become ready in $TimeoutSeconds seconds"
 }
 
@@ -103,6 +141,7 @@ function Get-RunEventText([object[]]$Events) {
 
 Push-Location $repoRoot
 try {
+  Stop-ExistingBackend
   node.exe scripts/cleanup-smoke-data.mjs | Out-Host
 
   New-Item -ItemType Directory -Force -Path $acceptanceRoot | Out-Null
@@ -112,14 +151,18 @@ try {
     -Encoding utf8
 
   if (-not (Test-BackendHealthy)) {
+    Remove-Item -LiteralPath $backendOut -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $backendErr -Force -ErrorAction SilentlyContinue
     $backend = Start-Process `
       -FilePath "node.exe" `
       -ArgumentList @("--import", "tsx", "src/backend/server.ts") `
       -WorkingDirectory $repoRoot `
       -PassThru `
-      -WindowStyle Hidden
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $backendOut `
+      -RedirectStandardError $backendErr
   }
-  Wait-Until -Probe { Test-BackendHealthy } -Name "Backend" -TimeoutSeconds 30
+  Wait-Until -Probe { Test-BackendHealthy } -Name "Backend" -TimeoutSeconds 90
   Add-Check "backend health"
 
   if (-not (Test-WebReady)) {
@@ -174,6 +217,7 @@ try {
   $migrations = @(Invoke-ApiArray -Path "/api/schema-migrations")
   Assert-True (@($migrations | Where-Object { $_.id -eq "0001_initial_runtime_schema" }).Count -eq 1) "Initial schema migration is missing"
   Assert-True (@($migrations | Where-Object { $_.id -eq "0002_agent_adapters_settings_artifacts" }).Count -eq 1) "Adapter/settings/artifacts schema migration is missing"
+  Assert-True (@($migrations | Where-Object { $_.id -eq "0003_tasks_approvals_references" }).Count -eq 1) "Tasks/approvals/references schema migration is missing"
   Add-Check "schema migrations"
 
   $setting = Invoke-Api `
@@ -201,6 +245,58 @@ try {
   $mcpServers = @(Invoke-ApiArray -Path "/api/mcp-servers")
   Assert-True (@($mcpServers | Where-Object { $_.name -eq "Smoke MCP" }).Count -eq 0) "Smoke MCP leaked into product data"
   Add-Check "mcp data clean"
+
+  $task = Invoke-Api `
+    -Path "/api/workspaces/$($workspace.id)/tasks" `
+    -Method "Post" `
+    -Body @{
+      title = "Acceptance task"
+      description = "Task marker WINAGENT_ACCEPTANCE_CONTEXT"
+      priority = "normal"
+    }
+  Assert-True ($task.title -eq "Acceptance task") "Task Center did not create the expected task"
+  Assert-True ($task.status -eq "todo") "New task did not start in todo status"
+  $tasks = @(Invoke-ApiArray -Path "/api/workspaces/$($workspace.id)/tasks")
+  Assert-True (@($tasks | Where-Object { $_.id -eq $task.id }).Count -eq 1) "Task Center did not list the created task"
+  $taskReview = Invoke-Api -Path "/api/tasks/$($task.id)/status" -Method "Post" -Body @{ status = "review" }
+  Assert-True ($taskReview.status -eq "review") "Task Center did not update task status"
+  Add-Check "task center"
+
+  $approval = Invoke-Api `
+    -Path "/api/workspaces/$($workspace.id)/approvals" `
+    -Method "Post" `
+    -Body @{
+      kind = "task_review"
+      title = "Acceptance approval"
+      description = "Approve acceptance task"
+      metadata = @{
+        taskId = $task.id
+        marker = "WINAGENT_ACCEPTANCE_CONTEXT"
+      }
+    }
+  Assert-True ($approval.status -eq "pending") "Approval Center did not create a pending approval"
+  $approvals = @(Invoke-ApiArray -Path "/api/workspaces/$($workspace.id)/approvals")
+  Assert-True (@($approvals | Where-Object { $_.id -eq $approval.id }).Count -eq 1) "Approval Center did not list the created approval"
+  $approved = Invoke-Api -Path "/api/approvals/$($approval.id)/decision" -Method "Post" -Body @{ status = "approved" }
+  Assert-True ($approved.status -eq "approved") "Approval Center did not persist the approval decision"
+  Add-Check "approval center"
+
+  $reference = Invoke-Api `
+    -Path "/api/workspaces/$($workspace.id)/references" `
+    -Method "Post" `
+    -Body @{
+      kind = "task"
+      targetId = $task.id
+      label = "Acceptance task reference"
+      summary = "Reusable task reference WINAGENT_ACCEPTANCE_CONTEXT"
+      metadata = @{
+        taskId = $task.id
+      }
+    }
+  Assert-True ($reference.kind -eq "task") "Reference Picker did not create a task reference"
+  $references = @(Invoke-ApiArray -Path "/api/workspaces/$($workspace.id)/references")
+  Assert-True (@($references | Where-Object { $_.id -eq $reference.id }).Count -eq 1) "Reference Picker did not list the created reference"
+  Add-Check "workspace references"
 
   if (-not $SkipCodexRun) {
     $run = Invoke-Api `
@@ -244,6 +340,14 @@ try {
 
     $workingMemory = Invoke-Api -Path "/api/runs/$($run.id)/working-memory"
     Assert-True ($workingMemory.content -match "WINAGENT_ACCEPTANCE_CONTEXT") "Working memory did not include retrieved acceptance context"
+
+    $runArtifacts = @(Invoke-ApiArray -Path "/api/runs/$($run.id)/artifacts")
+    Assert-True ($runArtifacts.Count -ge 1) "Run did not create an execution artifact"
+    $workspaceArtifacts = @(Invoke-ApiArray -Path "/api/workspaces/$($workspace.id)/artifacts")
+    Assert-True (@($workspaceArtifacts | Where-Object { $_.runId -eq $run.id }).Count -ge 1) "Workspace artifacts did not include the completed run artifact"
+    $artifactReferences = @(Invoke-ApiArray -Path "/api/workspaces/$($workspace.id)/references")
+    Assert-True (@($artifactReferences | Where-Object { $_.kind -eq "artifact" -and $_.metadata.runId -eq $run.id }).Count -ge 1) "Completed run artifact was not registered as a workspace reference"
+    Add-Check "run artifacts and references"
     Add-Check "real Codex Agent run"
   }
 
@@ -252,6 +356,7 @@ try {
   if ($backend -and -not $backend.HasExited) {
     Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
   }
+  Stop-ExistingBackend
   if ($web -and -not $web.HasExited) {
     Stop-Process -Id $web.Id -Force -ErrorAction SilentlyContinue
   }

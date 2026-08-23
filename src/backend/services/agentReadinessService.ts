@@ -82,23 +82,42 @@ const defaultAdapters: Array<{
 ];
 
 export class AgentReadinessService {
+  private cache:
+    | {
+        checkedAt: number;
+        records: AgentReadinessRecord[];
+      }
+    | undefined;
+  private readonly cacheMs = 60_000;
+
   constructor(
     private readonly agents: AgentRepository,
     private readonly adapters: AgentAdapterRepository
   ) {}
 
   list(): AgentReadinessRecord[] {
+    const now = Date.now();
+    if (this.cache && now - this.cache.checkedAt < this.cacheMs) {
+      return this.cache.records;
+    }
     this.ensureDefaultAdapters();
     const profiles = this.agents.list();
-    return this.adapters.list().map((adapter) => this.inspect(adapter, profiles));
+    const records = this.adapters.list().map((adapter) => this.inspect(adapter, profiles));
+    this.cache = { checkedAt: now, records };
+    return records;
   }
 
   ensureUsableProfiles(): void {
+    let provisioned = false;
     for (const readiness of this.list()) {
       if (readiness.status !== "ready" || readiness.profileId) {
         continue;
       }
       this.provision(readiness.id);
+      provisioned = true;
+    }
+    if (provisioned) {
+      this.cache = undefined;
     }
   }
 
@@ -118,7 +137,7 @@ export class AgentReadinessService {
         return profile;
       }
     }
-    return this.agents.create({
+    const profile = this.agents.create({
       adapterId: adapter.id,
       name: readiness.label,
       command: readiness.command,
@@ -127,6 +146,8 @@ export class AgentReadinessService {
       cwd,
       capabilities: adapter.capabilities
     });
+    this.cache = undefined;
+    return profile;
   }
 
   ensureDefaultAdapters(): void {

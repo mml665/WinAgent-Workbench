@@ -177,6 +177,43 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    assigned_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    source_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS approvals (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS workspace_references (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
   CREATE INDEX IF NOT EXISTS idx_runs_workspace ON runs(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, sequence);
@@ -185,6 +222,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_server ON mcp_tool_calls(server_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_workspace_memories_workspace ON workspace_memories(workspace_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_run_working_memory_run ON run_working_memory(run_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_approvals_workspace ON approvals(workspace_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_workspace_references_workspace ON workspace_references(workspace_id, created_at);
 `);
 
 for (const migration of [
@@ -211,7 +251,8 @@ for (const migration of [
 
 const bootstrapMigrations = [
   ["0001_initial_runtime_schema", "Initial local runtime schema"],
-  ["0002_agent_adapters_settings_artifacts", "Agent adapters, settings, run artifacts, and Agent readiness columns"]
+  ["0002_agent_adapters_settings_artifacts", "Agent adapters, settings, run artifacts, and Agent readiness columns"],
+  ["0003_tasks_approvals_references", "Task center, approval queue, and unified workspace references"]
 ] as const;
 
 const appliedAt = new Date().toISOString();
@@ -226,4 +267,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_agents_adapter ON agents(adapter_id);
   CREATE INDEX IF NOT EXISTS idx_run_artifacts_run ON run_artifacts(run_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_run ON mcp_tool_calls(run_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_approvals_workspace ON approvals(workspace_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_workspace_references_workspace ON workspace_references(workspace_id, created_at);
 `);

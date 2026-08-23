@@ -5,14 +5,19 @@ import type {
   McpToolCallRecord,
   McpToolRecord,
   MemoryType,
+  ApprovalRecord,
   RetrievalHit,
   RunArtifactRecord,
   RunWorkingMemoryRecord,
   RunEventRecord,
   RunRecord,
   SettingRecord,
+  TaskPriority,
+  TaskRecord,
+  TaskStatus,
   WorkspaceIndexRecord,
   WorkspaceMemoryRecord,
+  WorkspaceReferenceRecord,
   WorkspaceRecord
 } from "../shared/types";
 import { db } from "./db";
@@ -556,6 +561,20 @@ export class RunArtifactRepository {
       .map(mapRunArtifact);
   }
 
+  listByWorkspace(workspaceId: string, limit = 100): RunArtifactRecord[] {
+    return db
+      .prepare(
+        `SELECT a.*
+         FROM run_artifacts a
+         JOIN runs r ON r.id = a.run_id
+         WHERE r.workspace_id = ?
+         ORDER BY a.created_at DESC
+         LIMIT ?`
+      )
+      .all(workspaceId, limit)
+      .map(mapRunArtifact);
+  }
+
   create(input: {
     runId: string;
     kind: RunArtifactRecord["kind"];
@@ -583,6 +602,156 @@ export class RunArtifactRepository {
       at
     );
     return this.list(input.runId).find((artifact) => artifact.id === id)!;
+  }
+}
+
+export class TaskRepository {
+  list(workspaceId?: string): TaskRecord[] {
+    const rows = workspaceId
+      ? db
+          .prepare(`SELECT * FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 200`)
+          .all(workspaceId)
+      : db.prepare(`SELECT * FROM tasks ORDER BY created_at DESC LIMIT 200`).all();
+    return rows.map(mapTask);
+  }
+
+  get(id: string): TaskRecord | null {
+    const row = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id) as any;
+    return row ? mapTask(row) : null;
+  }
+
+  create(input: {
+    workspaceId: string;
+    title: string;
+    description?: string;
+    priority?: TaskPriority;
+    assignedAgentId?: string;
+    sourceRunId?: string;
+  }): TaskRecord {
+    const id = newId("task");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO tasks (
+        id, workspace_id, title, description, status, priority,
+        assigned_agent_id, source_run_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      input.workspaceId,
+      input.title.trim() || "Untitled task",
+      input.description?.trim() ?? "",
+      "todo",
+      input.priority ?? "normal",
+      input.assignedAgentId ?? null,
+      input.sourceRunId ?? null,
+      at,
+      at
+    );
+    return this.get(id)!;
+  }
+
+  updateStatus(id: string, status: TaskStatus): TaskRecord {
+    db.prepare(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`).run(status, nowIso(), id);
+    const task = this.get(id);
+    if (!task) {
+      throw new Error(`Task not found: ${id}`);
+    }
+    return task;
+  }
+}
+
+export class ApprovalRepository {
+  list(workspaceId?: string): ApprovalRecord[] {
+    const rows = workspaceId
+      ? db
+          .prepare(`SELECT * FROM approvals WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 200`)
+          .all(workspaceId)
+      : db.prepare(`SELECT * FROM approvals ORDER BY created_at DESC LIMIT 200`).all();
+    return rows.map(mapApproval);
+  }
+
+  get(id: string): ApprovalRecord | null {
+    const row = db.prepare(`SELECT * FROM approvals WHERE id = ?`).get(id) as any;
+    return row ? mapApproval(row) : null;
+  }
+
+  create(input: {
+    workspaceId: string;
+    runId?: string;
+    kind: ApprovalRecord["kind"];
+    title: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  }): ApprovalRecord {
+    const id = newId("approval");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO approvals (
+        id, workspace_id, run_id, kind, title, description, status, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      input.workspaceId,
+      input.runId ?? null,
+      input.kind,
+      input.title.trim() || "Review required",
+      input.description?.trim() ?? "",
+      "pending",
+      JSON.stringify(input.metadata ?? {}),
+      at,
+      at
+    );
+    return this.get(id)!;
+  }
+
+  decide(id: string, status: ApprovalRecord["status"]): ApprovalRecord {
+    if (status === "pending") {
+      throw new Error("Approval decision must be approved or rejected");
+    }
+    db.prepare(`UPDATE approvals SET status = ?, updated_at = ? WHERE id = ?`).run(status, nowIso(), id);
+    const approval = this.get(id);
+    if (!approval) {
+      throw new Error(`Approval not found: ${id}`);
+    }
+    return approval;
+  }
+}
+
+export class WorkspaceReferenceRepository {
+  list(workspaceId?: string): WorkspaceReferenceRecord[] {
+    const rows = workspaceId
+      ? db
+          .prepare(`SELECT * FROM workspace_references WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 200`)
+          .all(workspaceId)
+      : db.prepare(`SELECT * FROM workspace_references ORDER BY created_at DESC LIMIT 200`).all();
+    return rows.map(mapWorkspaceReference);
+  }
+
+  create(input: {
+    workspaceId: string;
+    kind: WorkspaceReferenceRecord["kind"];
+    targetId: string;
+    label: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+  }): WorkspaceReferenceRecord {
+    const id = newId("ref");
+    const at = nowIso();
+    db.prepare(
+      `INSERT INTO workspace_references (
+        id, workspace_id, kind, target_id, label, summary, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      input.workspaceId,
+      input.kind,
+      input.targetId,
+      input.label.trim() || input.targetId,
+      input.summary?.trim() ?? "",
+      JSON.stringify(input.metadata ?? {}),
+      at
+    );
+    return this.list(input.workspaceId).find((reference) => reference.id === id)!;
   }
 }
 
@@ -701,6 +870,49 @@ function mapRunArtifact(row: any): RunArtifactRecord {
     mimeType: row.mime_type,
     contentText: row.content_text ?? undefined,
     filePath: row.file_path ?? undefined,
+    metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+    createdAt: row.created_at
+  };
+}
+
+function mapTask(row: any): TaskRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    priority: row.priority,
+    assignedAgentId: row.assigned_agent_id ?? undefined,
+    sourceRunId: row.source_run_id ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapApproval(row: any): ApprovalRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    runId: row.run_id ?? undefined,
+    kind: row.kind,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapWorkspaceReference(row: any): WorkspaceReferenceRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    kind: row.kind,
+    targetId: row.target_id,
+    label: row.label,
+    summary: row.summary,
     metadata: parseJson<Record<string, unknown>>(row.metadata_json),
     createdAt: row.created_at
   };

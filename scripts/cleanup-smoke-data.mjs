@@ -13,6 +13,13 @@ db.exec(`
   )
 `);
 
+function tableExists(name) {
+  return Boolean(
+    db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+      .get(name)
+  );
+}
+
 const smokeRunIds = db
   .prepare(
     `SELECT id
@@ -43,6 +50,31 @@ const smokeWorkspaceIds = db
 
 db.exec("BEGIN");
 try {
+  if (tableExists("workspace_references")) {
+    db.prepare(
+      `DELETE FROM workspace_references
+       WHERE label LIKE 'Acceptance %'
+          OR summary LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'
+          OR metadata_json LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'
+          OR metadata_json LIKE '%WINAGENT_ACCEPTANCE_OK%'`
+    ).run();
+  }
+  if (tableExists("approvals")) {
+    db.prepare(
+      `DELETE FROM approvals
+       WHERE title LIKE 'Acceptance %'
+          OR description LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'
+          OR metadata_json LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'
+          OR metadata_json LIKE '%WINAGENT_ACCEPTANCE_OK%'`
+    ).run();
+  }
+  if (tableExists("tasks")) {
+    db.prepare(
+      `DELETE FROM tasks
+       WHERE title LIKE 'Acceptance %'
+          OR description LIKE '%WINAGENT_ACCEPTANCE_CONTEXT%'`
+    ).run();
+  }
   for (const runId of smokeRunIds) {
     db.prepare(`DELETE FROM runs WHERE id = ?`).run(runId);
   }

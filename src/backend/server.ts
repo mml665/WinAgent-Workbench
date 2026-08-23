@@ -2,11 +2,15 @@ import http from "node:http";
 import {
   AgentAdapterRepository,
   AgentRepository,
+  ApprovalRepository,
   MemoryRepository,
   McpServerRepository,
+  RunArtifactRepository,
   RunRepository,
   SettingRepository,
+  TaskRepository,
   WorkspaceIndexRepository,
+  WorkspaceReferenceRepository,
   WorkspaceRepository
 } from "./repositories";
 import { EventBus } from "./eventBus";
@@ -22,6 +26,7 @@ import { WorkspaceService } from "./services/workspaceService";
 import { WorkspaceIndexService } from "./services/workspaceIndexService";
 import { MemoryService } from "./services/memoryService";
 import { SystemService } from "./services/systemService";
+import { WorkbenchService } from "./services/workbenchService";
 import { WebSocketGateway } from "./websocketGateway";
 
 const workspaceRepo = new WorkspaceRepository();
@@ -32,12 +37,17 @@ const mcpRepo = new McpServerRepository();
 const workspaceIndexRepo = new WorkspaceIndexRepository();
 const memoryRepo = new MemoryRepository();
 const settingRepo = new SettingRepository();
+const taskRepo = new TaskRepository();
+const approvalRepo = new ApprovalRepository();
+const referenceRepo = new WorkspaceReferenceRepository();
+const artifactRepo = new RunArtifactRepository();
 
 const events = new EventBus(runRepo);
 const skills = new SkillRegistry();
 const workspaceIndex = new WorkspaceIndexService(workspaceRepo, workspaceIndexRepo);
 const mcpServers = new McpServerService(mcpRepo);
 const memory = new MemoryService(memoryRepo, runRepo);
+const workbench = new WorkbenchService(taskRepo, approvalRepo, referenceRepo, artifactRepo);
 const services = {
   workspaces: new WorkspaceService(workspaceRepo),
   agents: new AgentConfigService(agentRepo, agentAdapterRepo),
@@ -46,6 +56,7 @@ const services = {
   mcpServers,
   workspaceIndex,
   memory,
+  workbench,
   runs: new RunService(
     runRepo,
     workspaceRepo,
@@ -54,6 +65,9 @@ const services = {
     skills,
     mcpServers,
     memory,
+    artifactRepo,
+    approvalRepo,
+    referenceRepo,
     new ContextProvider(),
     workspaceIndex,
     new AgentProcessManager(),

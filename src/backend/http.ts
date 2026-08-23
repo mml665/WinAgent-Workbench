@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
-import type { MemoryType } from "../shared/types";
+import type { ApprovalStatus, MemoryType, TaskPriority, TaskStatus, WorkspaceReferenceRecord } from "../shared/types";
 import type { AgentConfigService } from "./services/agentConfigService";
 import type { McpServerService } from "./services/mcpServerService";
 import type { MemoryService } from "./services/memoryService";
@@ -9,6 +9,7 @@ import type { SkillRegistry } from "./services/skillRegistry";
 import type { SystemService } from "./services/systemService";
 import type { WorkspaceService } from "./services/workspaceService";
 import type { WorkspaceIndexService } from "./services/workspaceIndexService";
+import type { WorkbenchService } from "./services/workbenchService";
 
 export interface HttpServices {
   workspaces: WorkspaceService;
@@ -19,6 +20,7 @@ export interface HttpServices {
   workspaceIndex: WorkspaceIndexService;
   memory: MemoryService;
   runs: RunService;
+  workbench: WorkbenchService;
 }
 
 export async function handleApi(
@@ -173,6 +175,104 @@ export async function handleApi(
       );
       return;
     }
+    const tasksMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/tasks$/);
+    if (req.method === "GET" && tasksMatch) {
+      sendJson(res, 200, services.workbench.listTasks(tasksMatch[1]));
+      return;
+    }
+    if (req.method === "POST" && tasksMatch) {
+      const body = await readJson<{
+        title?: string;
+        description?: string;
+        priority?: TaskPriority;
+        assignedAgentId?: string;
+        sourceRunId?: string;
+      }>(req);
+      sendJson(
+        res,
+        200,
+        services.workbench.createTask({
+          workspaceId: tasksMatch[1],
+          title: body.title ?? "",
+          description: body.description,
+          priority: body.priority,
+          assignedAgentId: body.assignedAgentId,
+          sourceRunId: body.sourceRunId
+        })
+      );
+      return;
+    }
+    const taskStatusMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/status$/);
+    if (req.method === "POST" && taskStatusMatch) {
+      const body = await readJson<{ status?: TaskStatus }>(req);
+      sendJson(res, 200, services.workbench.updateTaskStatus(taskStatusMatch[1], body.status ?? "todo"));
+      return;
+    }
+    const approvalsMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/approvals$/);
+    if (req.method === "GET" && approvalsMatch) {
+      sendJson(res, 200, services.workbench.listApprovals(approvalsMatch[1]));
+      return;
+    }
+    if (req.method === "POST" && approvalsMatch) {
+      const body = await readJson<{
+        runId?: string;
+        kind?: "agent_action" | "failed_run" | "task_review" | "artifact_review";
+        title?: string;
+        description?: string;
+        metadata?: Record<string, unknown>;
+      }>(req);
+      sendJson(
+        res,
+        200,
+        services.workbench.createApproval({
+          workspaceId: approvalsMatch[1],
+          runId: body.runId,
+          kind: body.kind ?? "agent_action",
+          title: body.title ?? "",
+          description: body.description,
+          metadata: body.metadata
+        })
+      );
+      return;
+    }
+    const approvalDecisionMatch = url.pathname.match(/^\/api\/approvals\/([^/]+)\/decision$/);
+    if (req.method === "POST" && approvalDecisionMatch) {
+      const body = await readJson<{ status?: ApprovalStatus }>(req);
+      sendJson(res, 200, services.workbench.decideApproval(approvalDecisionMatch[1], body.status ?? "approved"));
+      return;
+    }
+    const referencesMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/references$/);
+    if (req.method === "GET" && referencesMatch) {
+      sendJson(res, 200, services.workbench.listReferences(referencesMatch[1]));
+      return;
+    }
+    if (req.method === "POST" && referencesMatch) {
+      const body = await readJson<{
+        kind?: WorkspaceReferenceRecord["kind"];
+        targetId?: string;
+        label?: string;
+        summary?: string;
+        metadata?: Record<string, unknown>;
+      }>(req);
+      sendJson(
+        res,
+        200,
+        services.workbench.createReference({
+          workspaceId: referencesMatch[1],
+          kind: body.kind ?? "file",
+          targetId: required(body.targetId ?? null, "targetId"),
+          label: body.label ?? body.targetId ?? "",
+          summary: body.summary,
+          metadata: body.metadata
+        })
+      );
+      return;
+    }
+    const workspaceArtifactsMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/artifacts$/);
+    if (req.method === "GET" && workspaceArtifactsMatch) {
+      sendJson(res, 200, services.workbench.listWorkspaceArtifacts(workspaceArtifactsMatch[1]));
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/runs") {
       sendJson(res, 200, services.runs.list());
       return;
@@ -203,6 +303,11 @@ export async function handleApi(
     const workingMemoryMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/working-memory$/);
     if (req.method === "GET" && workingMemoryMatch) {
       sendJson(res, 200, services.memory.getRunWorkingMemory(workingMemoryMatch[1]));
+      return;
+    }
+    const runArtifactsMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/);
+    if (req.method === "GET" && runArtifactsMatch) {
+      sendJson(res, 200, services.workbench.listRunArtifacts(runArtifactsMatch[1]));
       return;
     }
     const exportMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/export$/);

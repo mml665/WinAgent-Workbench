@@ -1,6 +1,14 @@
 import type { RunRecord, RunToolCallRequest } from "../../shared/types";
 import { EventBus } from "../eventBus";
-import { AgentRepository, McpServerRepository, RunRepository, WorkspaceRepository } from "../repositories";
+import {
+  AgentRepository,
+  ApprovalRepository,
+  McpServerRepository,
+  RunArtifactRepository,
+  RunRepository,
+  WorkspaceReferenceRepository,
+  WorkspaceRepository
+} from "../repositories";
 import { nowIso } from "../utils/time";
 import { AgentProcessManager } from "./agentProcessManager";
 import { ContextProvider } from "./contextProvider";
@@ -19,6 +27,9 @@ export class RunService {
     private readonly skills: SkillRegistry,
     private readonly mcpService: McpServerService,
     private readonly memory: MemoryService,
+    private readonly artifacts: RunArtifactRepository,
+    private readonly approvals: ApprovalRepository,
+    private readonly references: WorkspaceReferenceRepository,
     private readonly contextProvider: ContextProvider,
     private readonly workspaceIndex: WorkspaceIndexService,
     private readonly processManager: AgentProcessManager,
@@ -40,6 +51,10 @@ export class RunService {
 
   eventsForRun(runId: string, afterSequence = 0) {
     return this.runs.events(runId).filter((event) => event.sequence > afterSequence);
+  }
+
+  artifactsForRun(runId: string) {
+    return this.artifacts.list(runId);
   }
 
   exportMarkdown(runId: string): string {
@@ -267,6 +282,8 @@ export class RunService {
           summary: error.message
         });
         this.memory.rememberRunOutcome(failed);
+        this.recordTerminalArtifacts(failed, output, error.message);
+        this.recordFailedApproval(failed, error.message);
         this.events.publish(run.id, "run.failed", { error: error.message, endedAt });
         this.queue.complete(running);
       },
@@ -304,6 +321,10 @@ export class RunService {
           summary: summarize(output, stderr)
         });
         this.memory.rememberRunOutcome(finished);
+        this.recordTerminalArtifacts(finished, output, stderr);
+        if (status === "failed") {
+          this.recordFailedApproval(finished, stderr || finished.summary || "Run failed.");
+        }
         if (status === "completed") {
           this.events.publish(run.id, "run.completed", { code, endedAt, durationMs });
         } else if (status === "cancelled") {
@@ -314,6 +335,67 @@ export class RunService {
         this.events.publish(run.id, "run.status.changed", { status });
         this.queue.complete(running);
       }
+    });
+  }
+
+  private recordTerminalArtifacts(run: RunRecord, stdout: string, stderr: string): void {
+    const content = stdout.trim() || stderr.trim() || run.summary?.trim();
+    if (!content) {
+      return;
+    }
+    const existing = this.artifacts
+      .list(run.id)
+      .some((artifact) => artifact.metadata.source === "run-terminal-output");
+    if (existing) {
+      return;
+    }
+    const artifact = this.artifacts.create({
+      runId: run.id,
+      kind: "markdown",
+      name: `${run.title} output`,
+      mimeType: "text/markdown;charset=utf-8",
+      contentText: [
+        `# ${run.title}`,
+        "",
+        `- Run: ${run.id}`,
+        `- Status: ${run.status}`,
+        "",
+        "## Output",
+        "",
+        "```text",
+        content,
+        "```"
+      ].join("\n"),
+      metadata: {
+        source: "run-terminal-output",
+        status: run.status,
+        summary: run.summary ?? ""
+      }
+    });
+    this.references.create({
+      workspaceId: run.workspaceId,
+      kind: "artifact",
+      targetId: artifact.id,
+      label: artifact.name,
+      summary: run.summary ?? content.slice(0, 180),
+      metadata: { runId: run.id, mimeType: artifact.mimeType }
+    });
+  }
+
+  private recordFailedApproval(run: RunRecord, description: string): void {
+    const exists = this.approvals
+      .list(run.workspaceId)
+      .some((approval) => approval.runId === run.id && approval.kind === "failed_run");
+    if (exists) {
+      return;
+    }
+    this.approvals.create({
+      workspaceId: run.workspaceId,
+      runId: run.id,
+      kind: "failed_run",
+      title: `Review failed run: ${run.title}`,
+      description,
+      metadata: { runId: run.id, status: run.status, exitCode: run.exitCode }
     });
   }
 }

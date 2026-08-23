@@ -159,6 +159,48 @@ export interface RunArtifactRecord {
   createdAt: string;
 }
 
+export type TaskStatus = "todo" | "in_progress" | "review" | "completed" | "cancelled";
+export type TaskPriority = "low" | "normal" | "high";
+
+export interface TaskRecord {
+  id: string;
+  workspaceId: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignedAgentId?: string;
+  sourceRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+
+export interface ApprovalRecord {
+  id: string;
+  workspaceId: string;
+  runId?: string;
+  kind: "agent_action" | "failed_run" | "task_review" | "artifact_review";
+  title: string;
+  description: string;
+  status: ApprovalStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceReferenceRecord {
+  id: string;
+  workspaceId: string;
+  kind: "file" | "run" | "memory" | "artifact" | "task" | "agent";
+  targetId: string;
+  label: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface FileEntry {
   name: string;
   path: string;
