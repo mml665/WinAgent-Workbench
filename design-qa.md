@@ -70,6 +70,11 @@ Focused visual regions were checked against the source screenshots:
    - Fix: changed the floating window state from always-open to nullable, wired minimize and close controls to hide the window, and verified taskbar buttons reopen it.
    - Post-fix evidence: close behavior produced `before: 1`, `after: 0`, and reopening from the taskbar produced `reopened: 1`.
 
+6. User identified that the main Agent window could not be closed and was hardcoded as Codex.
+   - Severity: P1 for multi-Agent workspace usability.
+   - Fix: added nullable Agent window state, wired the main window minimize/close controls to hide it, added Codex/WorkBuddy/Qoder Agent App launchers in Applications and the Windows taskbar, and added one-click local profile creation for missing Agent commands.
+   - Post-fix evidence: close behavior produced `agentWindows: 0`; reopening WorkBuddy from the taskbar produced `agentWindows: 1`, `title: "WorkBuddy"`, and `Create WorkBuddy profile`; switching to Qoder produced `title: "Qoder"` and `Create Qoder profile`.
+
 ## Required fidelity surfaces
 
 - Fonts and typography: uses a Lexend/Inter/system stack similar to Tutti's rounded product typography, with reduced hero sizing to prevent overflow in WinAgent's narrower working area.

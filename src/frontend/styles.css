@@ -369,6 +369,33 @@ pre {
   gap: 8px;
 }
 
+.agent-app-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.agent-app-switcher button {
+  min-height: 34px;
+  padding: 6px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agent-app-switcher button.active,
+.profile-action {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.profile-action {
+  justify-self: start;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .sidebar-section span {
   color: var(--text-tertiary);
   font-size: 11px;
@@ -946,6 +973,23 @@ pre {
   background: rgba(255, 255, 255, 0.54);
   color: #2563eb;
   font-size: 20px;
+}
+
+.workspace-dock .agent-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.workspace-dock .agent-task span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #2563eb, #60a5fa);
+  color: white;
+  font-size: 11px;
 }
 
 .toast-error {

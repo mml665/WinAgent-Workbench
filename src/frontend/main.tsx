@@ -22,6 +22,31 @@ import "./styles.css";
 const apiBase = "http://127.0.0.1:8787";
 const memoryTypes: MemoryType[] = ["fact", "preference", "decision", "issue", "command", "run_summary"];
 type DesktopWindow = "apps" | "files" | "memory" | "mcp" | "runs";
+type AgentAppId = "codex" | "workbuddy" | "qoder";
+
+const agentApps: Array<{ id: AgentAppId; label: string; icon: string; command: string; description: string }> = [
+  {
+    id: "codex",
+    label: "Codex",
+    icon: "C",
+    command: "codex",
+    description: "Open a Codex-compatible local Agent session."
+  },
+  {
+    id: "workbuddy",
+    label: "WorkBuddy",
+    icon: "W",
+    command: "workbuddy",
+    description: "Open a WorkBuddy Agent profile in this workspace."
+  },
+  {
+    id: "qoder",
+    label: "Qoder",
+    icon: "Q",
+    command: "qoder",
+    description: "Open a Qoder Agent profile in this workspace."
+  }
+];
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
@@ -69,6 +94,8 @@ function App() {
     "This workspace prefers Windows-compatible Agent tooling with observable runs."
   );
   const [activeWindow, setActiveWindow] = useState<DesktopWindow | null>("apps");
+  const [agentWindowOpen, setAgentWindowOpen] = useState(true);
+  const [activeAgentAppId, setActiveAgentAppId] = useState<AgentAppId>("codex");
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [error, setError] = useState("");
@@ -340,6 +367,10 @@ function App() {
 
   const selectedWorkspace = workspaces.find((item) => item.id === selectedWorkspaceId);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
+  const activeAgentApp = agentApps.find((app) => app.id === activeAgentAppId) ?? agentApps[0];
+  const activeAgentProfile = agents.find((agent) =>
+    agent.name.toLowerCase().includes(activeAgentApp.label.toLowerCase())
+  );
   const runningRuns = runs.filter((run) => run.status === "running" || run.status === "queued");
   const attentionRuns = runs.filter((run) => run.status === "failed").slice(0, 4);
   const completedRuns = runs.filter((run) => run.status === "completed").slice(0, 4);
@@ -354,6 +385,38 @@ function App() {
     setPrompt((current) => `${current.trimEnd()} ${token} `.trimStart());
     setCommandPaletteOpen(false);
     setReferencePickerOpen(false);
+  }
+
+  function openAgentApp(appId: AgentAppId) {
+    const app = agentApps.find((candidate) => candidate.id === appId) ?? agentApps[0];
+    setActiveAgentAppId(app.id);
+    setAgentWindowOpen(true);
+    const profile = agents.find((agent) => agent.name.toLowerCase().includes(app.label.toLowerCase()));
+    if (profile) {
+      setSelectedAgentId(profile.id);
+    }
+  }
+
+  async function createAgentProfile(appId: AgentAppId) {
+    const app = agentApps.find((candidate) => candidate.id === appId) ?? agentApps[0];
+    try {
+      const agent = await api<AgentRecord>("/api/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          name: app.label,
+          command: app.command,
+          args: [],
+          env: {},
+          cwd: selectedWorkspace?.rootPath
+        })
+      });
+      await refreshAll();
+      setSelectedAgentId(agent.id);
+      openAgentApp(app.id);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
   }
 
   return (
@@ -383,18 +446,23 @@ function App() {
       {error ? <div className="toast-error">{error}</div> : null}
 
       <section className="desktop-stage">
+        {agentWindowOpen ? (
         <article className="workspace-window agent-window">
           <div className="window-titlebar">
             <div className="window-app-id">
-              <span className="window-app-icon">W</span>
-              <strong>Codex</strong>
+              <span className="window-app-icon">{activeAgentApp.icon}</span>
+              <strong>{activeAgentApp.label}</strong>
             </div>
             <span className="window-spacer" />
             <button className="title-action" onClick={() => setActiveWindow("runs")}>Session history</button>
-            <div className="windows-controls" aria-hidden="true">
-              <span>—</span>
-              <span>□</span>
-              <span>×</span>
+            <div className="windows-controls">
+              <button className="win-control" onClick={() => setAgentWindowOpen(false)} aria-label="Minimize Agent window">
+                —
+              </button>
+              <span aria-hidden="true">□</span>
+              <button className="win-control close" onClick={() => setAgentWindowOpen(false)} aria-label="Close Agent window">
+                ×
+              </button>
             </div>
           </div>
 
@@ -422,6 +490,17 @@ function App() {
               </div>
               <div className="sidebar-section">
                 <span>Agents</span>
+                <div className="agent-app-switcher">
+                  {agentApps.map((app) => (
+                    <button
+                      key={app.id}
+                      className={activeAgentAppId === app.id ? "active" : ""}
+                      onClick={() => openAgentApp(app.id)}
+                    >
+                      {app.label}
+                    </button>
+                  ))}
+                </div>
                 <select value={selectedAgentId} onChange={(event) => setSelectedAgentId(event.target.value)}>
                   {agents.map((agent) => (
                     <option key={agent.id} value={agent.id}>
@@ -430,6 +509,11 @@ function App() {
                   ))}
                 </select>
                 <small>{selectedAgent ? `${selectedAgent.command} ${selectedAgent.args.join(" ")}` : "No Agent"}</small>
+                {!activeAgentProfile ? (
+                  <button className="profile-action" onClick={() => void createAgentProfile(activeAgentApp.id)}>
+                    Create {activeAgentApp.label} profile
+                  </button>
+                ) : null}
               </div>
               <div className="session-list">
                 {recentRuns.map((run) => (
@@ -458,7 +542,14 @@ function App() {
                       <button>Tasks</button>
                       <button className="active">Apps</button>
                     </nav>
-                    <button onClick={() => appendPromptToken("@Codex")}>Codex · Start a local Agent run</button>
+                    {agentApps.map((app) => (
+                      <button key={app.id} onClick={() => {
+                        openAgentApp(app.id);
+                        appendPromptToken(`@${app.label}`);
+                      }}>
+                        {app.label} · {app.description}
+                      </button>
+                    ))}
                     <button onClick={() => appendPromptToken("@MCP.echo_context")}>MCP echo_context · Use tool output</button>
                     <button onClick={() => appendPromptToken("@Memory")}>Memory · Pull workspace memory</button>
                     <button onClick={() => appendPromptToken("@RunHistory")}>Run history · Use previous output</button>
@@ -533,6 +624,7 @@ function App() {
             </section>
           </div>
         </article>
+        ) : null}
 
         <aside className="control-center">
           <div className="control-head">
@@ -679,6 +771,14 @@ function App() {
 
         {activeWindow === "apps" ? (
           <div className="app-market">
+            {agentApps.map((app) => (
+              <button className="app-card agent-app-card" key={app.id} onClick={() => openAgentApp(app.id)}>
+                <span className="app-icon">{app.icon}</span>
+                <strong>{app.label}</strong>
+                <p>{app.description}</p>
+                <small>{activeAgentAppId === app.id && agentWindowOpen ? "Running" : "Open"}</small>
+              </button>
+            ))}
             {[
               ["Task Center", "Break goals into sub-tasks and send them to agents.", "Open"],
               ["Reference Picker", "Attach files, memories, tool calls, and run outputs.", "Open"],
@@ -848,6 +948,17 @@ function App() {
 
       <nav className="workspace-dock" aria-label="Workspace applications">
         <button className="start-button" onClick={() => setActiveWindow("apps")}>⊞</button>
+        {agentApps.map((app) => (
+          <button
+            key={app.id}
+            className={agentWindowOpen && activeAgentAppId === app.id ? "active agent-task" : "agent-task"}
+            onClick={() => openAgentApp(app.id)}
+            title={`Open ${app.label}`}
+          >
+            <span>{app.icon}</span>
+            {app.label}
+          </button>
+        ))}
         <button className={activeWindow === "apps" ? "active" : ""} onClick={() => setActiveWindow("apps")}>Apps</button>
         <button className={activeWindow === "files" ? "active" : ""} onClick={() => setActiveWindow("files")}>Files</button>
         <button className={activeWindow === "memory" ? "active" : ""} onClick={() => setActiveWindow("memory")}>Memory</button>
