@@ -224,9 +224,12 @@ function App() {
   const runningRuns = scopedRuns.filter((run) => run.status === "running" || run.status === "queued");
   const failedRuns = scopedRuns.filter((run) => run.status === "failed");
   const completedRuns = scopedRuns.filter((run) => run.status === "completed");
-  const attentionGroups = groupRunsByMessage(failedRuns).slice(0, 3);
-  const runningGroups = groupRunsByMessage(runningRuns).slice(0, 3);
-  const completedGroups = groupRunsByMessage(completedRuns).slice(0, 2);
+  const allRunningRuns = sortedRuns.filter((run) => run.status === "running" || run.status === "queued");
+  const allFailedRuns = sortedRuns.filter((run) => run.status === "failed");
+  const allCompletedRuns = sortedRuns.filter((run) => run.status === "completed");
+  const attentionGroups = groupRunsByMessage(allFailedRuns).slice(0, 3);
+  const runningGroups = groupRunsByMessage(allRunningRuns).slice(0, 3);
+  const completedGroups = groupRunsByMessage(allCompletedRuns).slice(0, 2);
   const recentRuns = scopedRuns.slice(0, 8);
   const selectedRun = scopedRuns[0];
   const selectedEvents = selectedRun ? events[selectedRun.id] ?? [] : [];
@@ -632,6 +635,96 @@ function App() {
     setReferencePickerOpen(false);
   }
 
+  function agentLabelForRun(run: RunRecord): string {
+    const agent = agents.find((item) => item.id === run.agentId);
+    if (!agent) {
+      return run.agentId;
+    }
+    const app = agentApps.find((candidate) => candidate.id === agent.adapterId);
+    return app?.label ?? agent.name;
+  }
+
+  function profileForAgentApp(appId: AgentAppId): AgentRecord | undefined {
+    const readiness = agentReadiness.find((item) => item.id === appId);
+    if (readiness?.status !== "ready" || !readiness.profileId) {
+      return undefined;
+    }
+    return agents.find((agent) => agent.id === readiness.profileId);
+  }
+
+  function handoffTargetsForRun(run: RunRecord): Array<{ app: (typeof agentApps)[number]; profile: AgentRecord }> {
+    return agentApps
+      .map((app) => ({ app, profile: profileForAgentApp(app.id) }))
+      .filter(
+        (target): target is { app: (typeof agentApps)[number]; profile: AgentRecord } =>
+          Boolean(target.profile) && target.profile?.id !== run.agentId
+      );
+  }
+
+  function handoffPrompt(sourceRun: RunRecord, sourceEvents: RunEventRecord[], targetLabel: string): string {
+    const sourceAgent = agentLabelForRun(sourceRun);
+    const answer = runDisplayMessage(sourceRun, sourceEvents);
+    return [
+      `You are ${targetLabel}. Continue from a previous ${sourceAgent} run in the same workspace.`,
+      "",
+      "Use the prior run as shared context. If you disagree with the prior answer, say why and provide a better next step.",
+      "",
+      `Source Agent: ${sourceAgent}`,
+      `Source run: ${sourceRun.title}`,
+      "",
+      "Original prompt:",
+      sourceRun.prompt,
+      "",
+      "Source Agent answer / latest output:",
+      answer || sourceRun.summary || "No answer captured yet.",
+      "",
+      "Now continue the work and return a concrete, usable result."
+    ].join("\n");
+  }
+
+  async function handoffRun(sourceRun: RunRecord, targetAppId: AgentAppId) {
+    const targetApp = agentApps.find((app) => app.id === targetAppId);
+    const targetProfile = profileForAgentApp(targetAppId);
+    if (!targetApp || !targetProfile) {
+      setError(`${targetApp?.label ?? targetAppId} does not have a runnable profile.`);
+      return;
+    }
+    try {
+      const sourceEvents = events[sourceRun.id] ?? (await api<RunEventRecord[]>(`/api/runs/${sourceRun.id}/events`));
+      setEvents((previous) => ({ ...previous, [sourceRun.id]: sourceEvents }));
+      await api<RunRecord>("/api/runs", {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId: sourceRun.workspaceId,
+          agentId: targetProfile.id,
+          title: `Handoff to ${targetApp.label}: ${sourceRun.title}`,
+          prompt: handoffPrompt(sourceRun, sourceEvents, targetApp.label),
+          retrievalQuery: sourceRun.retrievalQuery || sourceRun.prompt.slice(0, 120),
+          timeoutMs,
+          maxRetries
+        })
+      });
+      await Promise.all([refreshRuns(), loadWorkbench(selectedWorkspaceId)]);
+      setActiveAgentAppId(targetApp.id);
+      setAgentWindowOpen(true);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  function renderHandoffActions(run: RunRecord) {
+    const targets = handoffTargetsForRun(run);
+    if (targets.length === 0) {
+      return null;
+    }
+    return targets.slice(0, 3).map(({ app }) => (
+      <button key={app.id} onClick={() => void handoffRun(run, app.id)}>
+        Handoff to {app.label}
+      </button>
+    ));
+  }
+
   function openAgentApp(appId: AgentAppId) {
     const app = agentApps.find((candidate) => candidate.id === appId) ?? agentApps[0];
     setActiveAgentAppId(app.id);
@@ -942,15 +1035,15 @@ function App() {
 
           <section className="message-overview" aria-label="Run status summary">
             <div className="metric-card attention">
-              <strong>{failedRuns.length}</strong>
+              <strong>{allFailedRuns.length}</strong>
               <span>Need review</span>
             </div>
             <div className="metric-card">
-              <strong>{runningRuns.length}</strong>
+              <strong>{allRunningRuns.length}</strong>
               <span>Running</span>
             </div>
             <div className="metric-card">
-              <strong>{completedRuns.length}</strong>
+              <strong>{allCompletedRuns.length}</strong>
               <span>Completed</span>
             </div>
             <div className="metric-card">
@@ -1009,6 +1102,7 @@ function App() {
                   <strong>{group.latest.title}</strong>
                   <span>{messageStatusLabel(group.latest.status)}</span>
                 </div>
+                <small>From {agentLabelForRun(group.latest)}</small>
                 <p>{compactRunMessage(group.latest)}</p>
                 <div className="message-meta">
                   <small>{group.runs.length > 1 ? `${group.runs.length} related runs` : "Latest failure"}</small>
@@ -1017,6 +1111,7 @@ function App() {
                 <div className="message-actions">
                   <button onClick={() => openRunDetails(group.latest)}>Open details</button>
                   <button onClick={() => void exportRun(group.latest)}>Export</button>
+                  {renderHandoffActions(group.latest)}
                 </div>
               </div>
             ))}
@@ -1031,10 +1126,12 @@ function App() {
                   <strong>{group.latest.title}</strong>
                   <span>{messageStatusLabel(group.latest.status)}</span>
                 </div>
+                <small>From {agentLabelForRun(group.latest)}</small>
                 <p>{compactRunMessage(group.latest)}</p>
                 <div className="message-actions">
                   <button onClick={() => openRunDetails(group.latest)}>Open details</button>
                   <button onClick={() => void cancelRun(group.latest.id)}>Cancel</button>
+                  {renderHandoffActions(group.latest)}
                 </div>
               </div>
               ))}
@@ -1050,8 +1147,12 @@ function App() {
                   <strong>{group.latest.title}</strong>
                   <span>{messageStatusLabel(group.latest.status)}</span>
                 </div>
+                <small>From {agentLabelForRun(group.latest)}</small>
                 <p>{compactRunMessage(group.latest)}</p>
-                <button onClick={() => openRunDetails(group.latest)}>Open details</button>
+                <div className="message-actions">
+                  <button onClick={() => openRunDetails(group.latest)}>Open details</button>
+                  {renderHandoffActions(group.latest)}
+                </div>
               </div>
             ))}
           </section>
