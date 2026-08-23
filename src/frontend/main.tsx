@@ -237,13 +237,14 @@ function App() {
   const [memoryContent, setMemoryContent] = useState(
     "This workspace prefers Windows-compatible Agent tooling with observable runs."
   );
-  const [activeWindow, setActiveWindow] = useState<DesktopWindow | null>("apps");
+  const [activeWindow, setActiveWindow] = useState<DesktopWindow | null>(null);
   const [agentWindowOpen, setAgentWindowOpen] = useState(true);
   const [activeAgentAppId, setActiveAgentAppId] = useState<AgentAppId>("codex");
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [mentionCategory, setMentionCategory] = useState<MentionCategory>("sessions");
   const [mentionQuery, setMentionQuery] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [liveOutputExpanded, setLiveOutputExpanded] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>("checking");
   const [runtimeMessage, setRuntimeMessage] = useState("Connecting to the local WinAgent runtime.");
@@ -273,7 +274,7 @@ function App() {
   const runningGroups = groupRunsByMessage(allRunningRuns).slice(0, 3);
   const completedGroups = groupRunsByMessage(allCompletedRuns).slice(0, 2);
   const recentRuns = scopedRuns.slice(0, 8);
-  const selectedRun = scopedRuns[0];
+  const selectedRun = scopedRuns.find((run) => run.id === selectedRunId) ?? scopedRuns[0];
   const selectedEvents = selectedRun ? events[selectedRun.id] ?? [] : [];
   const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
   const openTasks = tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled");
@@ -530,7 +531,7 @@ function App() {
     try {
       const nextPrompt = buildComposerPrompt(userPrompt);
       const nextTitle = title.trim() || userPrompt.slice(0, 48) || "Untitled run";
-      await api<RunRecord>("/api/runs", {
+      const run = await api<RunRecord>("/api/runs", {
         method: "POST",
         body: JSON.stringify({
           workspaceId: selectedWorkspaceId,
@@ -545,6 +546,7 @@ function App() {
           toolCalls: runToolCalls
         })
       });
+      setSelectedRunId(run.id);
       await refreshRuns();
       setTitle("");
       setPrompt("");
@@ -884,6 +886,7 @@ function App() {
   }
 
   function openRunDetails(run: RunRecord) {
+    setSelectedRunId(run.id);
     void loadRunEvents(run.id);
     void loadWorkingMemory(run.id);
     setActiveWindow("runs");
@@ -1219,7 +1222,15 @@ function App() {
                   </p>
                 ) : null}
                 {recentRuns.map((run) => (
-                  <button key={run.id} className="session-item" onClick={() => void loadRunEvents(run.id)}>
+                  <button
+                    key={run.id}
+                    className={selectedRun?.id === run.id ? "session-item active" : "session-item"}
+                    onClick={() => {
+                      setSelectedRunId(run.id);
+                      void loadRunEvents(run.id);
+                      void loadWorkingMemory(run.id);
+                    }}
+                  >
                     <strong>{run.title}</strong>
                     <span>{run.status}</span>
                     <small>{run.summary || run.prompt}</small>
@@ -1231,8 +1242,10 @@ function App() {
             <section className="agent-canvas">
               <div className="agent-hero">
                 <div className="agent-orb">›_</div>
-                <h1>What can your Agent help you with?</h1>
-                <p>Reference files, memories, app outputs, MCP tools, and run history from one workspace.</p>
+                <div>
+                  <h1>{activeAgentApp.label} workspace</h1>
+                  <p>Send a task, attach context with +, or pull workspace history with @.</p>
+                </div>
               </div>
 
               <div className="composer-card">
@@ -1364,8 +1377,8 @@ function App() {
                     </p>
                   )}
                   <div className="message-actions">
-                    <button disabled={!selectedRun} onClick={() => selectedRun ? openRunDetails(selectedRun) : undefined}>
-                      Open details
+                    <button disabled={!selectedRun} onClick={() => setActiveWindow("runs")}>
+                      Session history
                     </button>
                     <button disabled={!output} onClick={() => setLiveOutputExpanded((expanded) => !expanded)}>
                       {liveOutputExpanded ? "Hide logs" : "Show logs"}
