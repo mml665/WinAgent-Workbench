@@ -8,6 +8,7 @@
 - Implementation screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-tutti-redesign-clean.png`
 - Windows-style follow-up screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-windows-workbench.png`
 - Hidden-window behavior screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-window-hidden.png`
+- Single-screen workbench screenshot path: `E:\WinAgent-Workbench\.tmp\winagent-single-screen-workbench-final.png`
 - Viewport: Codex in-app browser desktop viewport, captured full page.
 - Source pixel dimensions: README screenshots are 1600 x 1000.
 - Implementation pixel dimensions: browser-rendered screenshot captured from local Vite app.
@@ -74,6 +75,12 @@ Focused visual regions were checked against the source screenshots:
    - Severity: P1 for multi-Agent workspace usability.
    - Fix: added nullable Agent window state, wired the main window minimize/close controls to hide it, added Codex/WorkBuddy/Qoder Agent App launchers in Applications and the Windows taskbar, and added one-click local profile creation for missing Agent commands.
    - Post-fix evidence: close behavior produced `agentWindows: 0`; reopening WorkBuddy from the taskbar produced `agentWindows: 1`, `title: "WorkBuddy"`, and `Create WorkBuddy profile`; switching to Qoder produced `title: "Qoder"` and `Create Qoder profile`.
+
+7. User identified that the page became too tall compared with Tutti's desktop workbench.
+   - Severity: P1 for desktop fidelity and usability.
+   - Source check: Tutti's desktop shell uses `h-screen min-h-0 overflow-hidden` at the workspace window level, and the workbench surface uses a bounded `position: relative; min-height: 0; overflow: hidden` container with internal window/dock scrolling instead of browser-page scrolling.
+   - Fix: changed WinAgent to a fixed `100vh` desktop shell, bounded the stage and Agent window with `min-height: 0`, made sidebar/message/terminal regions scroll internally, fixed the sidebar row definition from three rows to four rows, and changed the composer toolbar to a two-row grid to avoid horizontal clipping.
+   - Post-fix evidence: browser verification returned `documentScrollEqualsViewport: true`, `bodyOverflow: "hidden"`, `toolbarHorizontalOverflow: 0`, `controlCenterHorizontalOverflow: 0`, and non-overlapping sidebar regions. Final screenshot: `E:\WinAgent-Workbench\.tmp\winagent-single-screen-workbench-final.png`.
 
 ## Required fidelity surfaces
 
